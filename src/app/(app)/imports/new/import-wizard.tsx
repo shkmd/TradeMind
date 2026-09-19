@@ -25,6 +25,7 @@ export function ImportWizard({
   brokerName: string;
 }) {
   const [step, setStep] = useState<Step>("upload");
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [uploadState, uploadFormAction, isUploading] = useActionState(uploadImportAction, uploadInitialState);
   const [confirmState, confirmFormAction, isConfirming] = useActionState(confirmImportAction, confirmInitialState);
 
@@ -60,9 +61,21 @@ export function ImportWizard({
                 className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-surface-border bg-surface px-6 py-10 text-center hover:bg-surface-muted"
               >
                 <UploadCloud className="h-8 w-8 text-muted-foreground" />
-                <span className="text-sm font-medium">Click to select a .csv or .xlsx file</span>
+                {selectedFileName ? (
+                  <span className="text-sm font-medium text-foreground">{selectedFileName}</span>
+                ) : (
+                  <span className="text-sm font-medium">Click to select a .csv or .xlsx file</span>
+                )}
                 <span className="text-xs text-muted-foreground">{reportLocationHint(brokerCode)}</span>
-                <input id="file" name="file" type="file" accept=".csv,.xlsx" className="hidden" required />
+                <input
+                  id="file"
+                  name="file"
+                  type="file"
+                  accept=".csv,.xlsx"
+                  className="hidden"
+                  required
+                  onChange={(e) => setSelectedFileName(e.target.files?.[0]?.name ?? null)}
+                />
               </label>
 
               {uploadState.status === "error" && uploadState.message && (

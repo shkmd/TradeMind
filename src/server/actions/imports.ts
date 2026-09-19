@@ -26,6 +26,17 @@ export async function uploadImportAction(
   const file = formData.get("file");
 
   if (typeof brokerAccountId !== "string" || typeof brokerCode !== "string" || !brokerAccountId || !brokerCode) {
+    // Temporary diagnostic: this check has been failing for at least one
+    // real user despite the hidden inputs looking correct in SSR HTML and a
+    // fresh end-to-end repro working fine. Logging exactly what FormData
+    // actually contained server-side, to tell a genuinely-empty field apart
+    // from something odder (wrong key name, a stale/duplicate field, etc).
+    console.error("[uploadImportAction] Missing broker account — FormData keys received:", {
+      keys: Array.from(formData.keys()),
+      brokerAccountId,
+      brokerCode,
+      userId: session.user.id,
+    });
     return { status: "error", message: "Missing broker account." };
   }
   if (!(file instanceof File) || file.size === 0) {
