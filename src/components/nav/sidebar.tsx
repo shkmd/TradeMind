@@ -17,7 +17,7 @@ export function SidebarNav({ roles }: { roles: RoleKey[] }) {
         <LineChart className="h-6 w-6 shrink-0" />
         <span className="text-base font-semibold tracking-tight">TradeMind India</span>
       </div>
-      <nav className="flex-1 space-y-5 overflow-y-auto px-2 pb-4">
+      <nav className="nav-scroll flex-1 space-y-5 overflow-y-auto px-2 pb-4">
         {sections.map((section, idx) => (
           <div key={section.label ?? `section-${idx}`}>
             {section.label && (

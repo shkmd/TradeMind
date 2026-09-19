@@ -50,3 +50,42 @@
     @apply font-serif tabular-nums;
   }
 }
+
+/* Thin, unobtrusive scrollbars in place of the OS default — applied
+   globally, with a lighter variant for scroll areas on the dark sidebar. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
+
+.nav-scroll {
+  scrollbar-color: hsl(0 0% 100% / 0.18) transparent;
+}
+
+.nav-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(0 0% 100% / 0.18);
+}
+
+.nav-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(0 0% 100% / 0.32);
+}
