@@ -7,13 +7,60 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatINR, formatPercent } from "@/lib/utils";
 
+interface HoldingRow {
+  id: string;
+  symbol: string;
+  brokerNickname: string;
+  quantity: number;
+  avgCostPrice: number;
+  currentPrice: number | null;
+}
+
 export default async function HoldingsPage() {
   const session = await requireSession();
-  const holdings = await prisma.holding.findMany({
+  const liveSyncedHoldings = await prisma.holding.findMany({
     where: { userId: session.user.id, deletedAt: null },
     include: { instrument: true, brokerAccount: true },
     orderBy: { createdAt: "desc" },
   });
+
+  // CSV imports never populate Holding (only live broker-API sync does —
+  // see broker-connect.service.ts) — without this, every unsold equity
+  // delivery buy from a CSV-imported account would have nowhere to show up
+  // as a holding at all. Skip any instrument a live sync already covers,
+  // since that row has a real current price and this one wouldn't.
+  const coveredInstrumentIds = new Set(liveSyncedHoldings.map((h) => h.instrumentId));
+  const openDeliveryTrades = await prisma.trade.findMany({
+    where: {
+      userId: session.user.id,
+      deletedAt: null,
+      status: { in: ["OPEN", "PARTIALLY_CLOSED"] },
+      productType: "DELIVERY",
+      instrument: { segment: "EQUITY" },
+      instrumentId: { notIn: Array.from(coveredInstrumentIds) },
+    },
+    include: { instrument: true, brokerAccount: true },
+    orderBy: { openedAt: "desc" },
+  });
+
+  const holdings: HoldingRow[] = [
+    ...liveSyncedHoldings.map((h) => ({
+      id: h.id,
+      symbol: h.instrument.symbol,
+      brokerNickname: h.brokerAccount.nickname,
+      quantity: Number(h.quantity),
+      avgCostPrice: Number(h.avgCostPrice),
+      currentPrice: h.currentPrice ? Number(h.currentPrice) : null,
+    })),
+    ...openDeliveryTrades.map((t) => ({
+      id: t.id,
+      symbol: t.instrument.symbol,
+      brokerNickname: t.brokerAccount.nickname,
+      quantity: t.quantity,
+      avgCostPrice: Number(t.entryAvgPrice),
+      currentPrice: null, // no live price feed for CSV-imported positions
+    })),
+  ];
 
   return (
     <div>
@@ -38,21 +85,19 @@ export default async function HoldingsPage() {
             </TableHeader>
             <TableBody>
               {holdings.map((h) => {
-                const qty = Number(h.quantity);
-                const avgCost = Number(h.avgCostPrice);
-                const current = h.currentPrice ? Number(h.currentPrice) : null;
-                const value = current !== null ? current * qty : null;
-                const unrealised = current !== null ? (current - avgCost) * qty : null;
-                const unrealisedPct = current !== null ? ((current - avgCost) / avgCost) * 100 : null;
+                const value = h.currentPrice !== null ? h.currentPrice * h.quantity : null;
+                const unrealised = h.currentPrice !== null ? (h.currentPrice - h.avgCostPrice) * h.quantity : null;
+                const unrealisedPct =
+                  h.currentPrice !== null ? ((h.currentPrice - h.avgCostPrice) / h.avgCostPrice) * 100 : null;
                 return (
                   <TableRow key={h.id}>
-                    <TableCell className="font-medium">{h.instrument.symbol}</TableCell>
-                    <TableCell className="text-muted-foreground">{h.brokerAccount.nickname}</TableCell>
-                    <TableCell>{qty}</TableCell>
-                    <TableCell>{formatINR(avgCost)}</TableCell>
-                    <TableCell>{current !== null ? formatINR(current) : "—"}</TableCell>
+                    <TableCell className="font-medium">{h.symbol}</TableCell>
+                    <TableCell className="text-muted-foreground">{h.brokerNickname}</TableCell>
+                    <TableCell>{h.quantity}</TableCell>
+                    <TableCell>{formatINR(h.avgCostPrice)}</TableCell>
+                    <TableCell>{h.currentPrice !== null ? formatINR(h.currentPrice) : "—"}</TableCell>
                     <TableCell>{value !== null ? formatINR(value) : "—"}</TableCell>
-                    <TableCell className={unrealised !== null && unrealised >= 0 ? "text-success" : "text-danger"}>
+                    <TableCell className={unrealised === null ? "text-muted-foreground" : unrealised >= 0 ? "text-success" : "text-danger"}>
                       {unrealised !== null ? `${formatINR(unrealised)} (${formatPercent(unrealisedPct)})` : "—"}
                     </TableCell>
                   </TableRow>
