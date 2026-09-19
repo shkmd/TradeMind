@@ -27,9 +27,15 @@ export default async function HoldingsPage() {
   // CSV imports never populate Holding (only live broker-API sync does —
   // see broker-connect.service.ts) — without this, every unsold equity
   // delivery buy from a CSV-imported account would have nowhere to show up
-  // as a holding at all. Skip any instrument a live sync already covers,
-  // since that row has a real current price and this one wouldn't.
-  const coveredInstrumentIds = new Set(liveSyncedHoldings.map((h) => h.instrumentId));
+  // as a holding at all. But a CSV-derived "still open" position can be
+  // stale: the export's date range (or a row that failed to parse) can
+  // miss the actual closing sell, leaving a position that's genuinely
+  // already gone showing as open here forever. A successful live sync is
+  // the authoritative current state for that broker account — once one
+  // exists, trust it completely and stop falling back to CSV-derived
+  // guesses for that same account, rather than only skipping the specific
+  // instruments the live sync happened to match.
+  const liveTrackedBrokerAccountIds = new Set(liveSyncedHoldings.map((h) => h.brokerAccountId));
   const openDeliveryTrades = await prisma.trade.findMany({
     where: {
       userId: session.user.id,
@@ -37,7 +43,7 @@ export default async function HoldingsPage() {
       status: { in: ["OPEN", "PARTIALLY_CLOSED"] },
       productType: "DELIVERY",
       instrument: { segment: "EQUITY" },
-      instrumentId: { notIn: Array.from(coveredInstrumentIds) },
+      brokerAccountId: { notIn: Array.from(liveTrackedBrokerAccountIds) },
     },
     include: { instrument: true, brokerAccount: true },
     orderBy: { openedAt: "desc" },
