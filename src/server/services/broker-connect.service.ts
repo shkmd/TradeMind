@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { getApiConnector, getDirectLoginConnector } from "@/lib/brokers/api-connector-registry";
+import { findEquityInstrumentByFuzzyName } from "@/server/services/instrument.service";
 import { encryptToken, decryptToken } from "@/lib/crypto/token-encryption";
 import { persistExecutionIfNew, regenerateTradesForInstruments } from "@/lib/import/execution-ingest";
 import type { CanonicalExecutionRow } from "@/lib/brokers/adapter";
@@ -305,9 +306,13 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   // intentionally keeps this simple.
   let holdingsSynced = 0;
   for (const holding of holdings) {
-    const instrument = await prisma.instrument.findFirst({
+    let instrument = await prisma.instrument.findFirst({
       where: { symbol: holding.symbol, exchange: { code: holding.exchange } },
     });
+    // Exact match fails for Angel One specifically (see
+    // findEquityInstrumentByFuzzyName's doc comment) — try the bounded,
+    // never-guess fallback before giving up on this holding.
+    if (!instrument) instrument = await findEquityInstrumentByFuzzyName(brokerAccountId, holding.symbol);
     if (!instrument) continue; // resolved next sync once an execution creates it
 
     const existingHolding = await prisma.holding.findFirst({ where: { brokerAccountId, instrumentId: instrument.id } });

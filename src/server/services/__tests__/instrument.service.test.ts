@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildDerivativeInstrumentFields } from "../instrument.service";
+import { buildDerivativeInstrumentFields, matchEquityInstrumentByName } from "../instrument.service";
 import { parseAngelContract } from "@/lib/brokers/angel-one/contract-parser";
 
 function parse(raw: string) {
@@ -50,5 +50,39 @@ describe("buildDerivativeInstrumentFields — futures", () => {
     const a = buildDerivativeInstrumentFields(parse("FUTCOM CRUDEOILM 19NOV24"));
     const b = buildDerivativeInstrumentFields(parse("FUTCOM CRUDEOILM 17DEC24"));
     expect(a.symbol).not.toBe(b.symbol);
+  });
+});
+
+describe("matchEquityInstrumentByName", () => {
+  // Real examples: Angel One's CSV export names equity rows by full company
+  // display name, its live SmartAPI returns the bare NSE trading symbol.
+  const csvInstruments = [
+    { symbol: "WIPRO LTD" },
+    { symbol: "IDFC FIRST BANK LIMITED" },
+    { symbol: "SJVN LTD" },
+    { symbol: "SUZLON ENERGY LIMITED" },
+    { symbol: "CANARA ROBECO AMC LIMITED" },
+  ];
+
+  it("matches a bare live trading symbol to its CSV-imported full company name", () => {
+    expect(matchEquityInstrumentByName(csvInstruments, "WIPRO")?.symbol).toBe("WIPRO LTD");
+    expect(matchEquityInstrumentByName(csvInstruments, "SJVN")?.symbol).toBe("SJVN LTD");
+    expect(matchEquityInstrumentByName(csvInstruments, "SUZLON")?.symbol).toBe("SUZLON ENERGY LIMITED");
+  });
+
+  it("matches a truncated-at-10-chars NSE symbol via the prefix relationship", () => {
+    // NSE symbols are capped at 10 characters — IDFCFIRSTB is a prefix of
+    // the normalized full name IDFCFIRSTBANK, not an exact match.
+    expect(matchEquityInstrumentByName(csvInstruments, "IDFCFIRSTB")?.symbol).toBe("IDFC FIRST BANK LIMITED");
+  });
+
+  it("returns null (never guesses) when nothing matches", () => {
+    expect(matchEquityInstrumentByName(csvInstruments, "RELIANCE")).toBeNull();
+  });
+
+  it("returns null (never guesses) when the live symbol is ambiguous between two real, distinct candidates", () => {
+    const ambiguous = [{ symbol: "TATA MOTORS LTD" }, { symbol: "TATA STEEL LIMITED" }];
+    // A naive "starts with TATA" match would hit both — must not pick either.
+    expect(matchEquityInstrumentByName(ambiguous, "TATA")).toBeNull();
   });
 });

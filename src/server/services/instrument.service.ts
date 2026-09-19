@@ -142,3 +142,50 @@ export async function resolveInstrument(
   cache?.instruments.set(instrumentKey, instrument);
   return instrument;
 }
+
+function normalizeCompanyName(raw: string): string {
+  return raw
+    .toUpperCase()
+    .replace(/\b(LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/g, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Pure matching core, kept separate from the DB fetch below so it's
+ * directly unit-testable. Bridges a live-API bare trading symbol (e.g.
+ * "WIPRO") to a CSV-imported equity Instrument, when the two disagree on
+ * naming. Angel One's "Trades and Charges" export names equity rows by full
+ * company display name (e.g. "WIPRO LTD" — verified against a real export,
+ * not assumed), while its live SmartAPI holdings/trades endpoints return the
+ * bare NSE symbol. The CSV has no ISIN to join on either, so an exact
+ * `symbol` match fails for every equity holding pulled live after a CSV
+ * import — this is the fallback live-sync holdings-matching needs.
+ *
+ * Deliberately narrow to avoid mismatching two different real stocks: the
+ * caller scopes `candidates` to one broker account's own already-imported
+ * equity instruments (never the whole DB), and this only returns a match
+ * when exactly one candidate's normalized name and the live symbol are a
+ * prefix of each other — an ambiguous or zero-candidate result returns null
+ * rather than guessing.
+ */
+export function matchEquityInstrumentByName<T extends { symbol: string }>(
+  candidates: T[],
+  liveSymbol: string
+): T | null {
+  const normalizedLive = liveSymbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const matches = candidates.filter((c) => {
+    const normalizedCsv = normalizeCompanyName(c.symbol);
+    return normalizedCsv.length > 0 && (normalizedCsv.startsWith(normalizedLive) || normalizedLive.startsWith(normalizedCsv));
+  });
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export async function findEquityInstrumentByFuzzyName(
+  brokerAccountId: string,
+  liveSymbol: string
+): Promise<Instrument | null> {
+  const candidates = await prisma.instrument.findMany({
+    where: { segment: "EQUITY", executions: { some: { brokerAccountId } } },
+  });
+  return matchEquityInstrumentByName(candidates, liveSymbol);
+}
