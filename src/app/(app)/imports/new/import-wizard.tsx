@@ -1,17 +1,25 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { CheckCircle2, FileWarning, UploadCloud, XCircle } from "lucide-react";
-import { uploadImportAction, confirmImportAction, type UploadImportState, type ConfirmImportState } from "@/server/actions/imports";
+import {
+  getImportUploadUrlAction,
+  createImportJobAction,
+  confirmImportAction,
+  type CreateImportJobState,
+  type ConfirmImportState,
+} from "@/server/actions/imports";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatINR } from "@/lib/utils";
 
-const uploadInitialState: UploadImportState = { status: "idle" };
+const uploadInitialState: CreateImportJobState = { status: "idle" };
 const confirmInitialState: ConfirmImportState = { status: "idle" };
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB — also enforced server-side
 
 type Step = "upload" | "review" | "summary";
 
@@ -25,8 +33,9 @@ export function ImportWizard({
   brokerName: string;
 }) {
   const [step, setStep] = useState<Step>("upload");
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [uploadState, uploadFormAction, isUploading] = useActionState(uploadImportAction, uploadInitialState);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadState, setUploadState] = useState<CreateImportJobState>(uploadInitialState);
+  const [isUploading, startUploadTransition] = useTransition();
   const [confirmState, confirmFormAction, isConfirming] = useActionState(confirmImportAction, confirmInitialState);
 
   useEffect(() => {
@@ -36,6 +45,60 @@ export function ImportWizard({
   useEffect(() => {
     if (confirmState.status === "success") setStep("summary");
   }, [confirmState.status]);
+
+  function handleUploadSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selectedFile) {
+      setUploadState({ status: "error", message: "Select a Tradebook file to upload." });
+      return;
+    }
+    if (selectedFile.size === 0) {
+      setUploadState({ status: "error", message: "Select a Tradebook file to upload." });
+      return;
+    }
+    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
+      setUploadState({ status: "error", message: "File is too large (max 10MB)." });
+      return;
+    }
+
+    const file = selectedFile;
+    startUploadTransition(async () => {
+      try {
+        // The file goes straight from the browser to storage via a signed
+        // URL — not through this server's request body. See the doc comment
+        // on getSignedImportUploadUrl (src/lib/storage/s3.ts) for why: a
+        // real ~11,000-row file sent as a server-action multipart body
+        // arrived at the server as a completely empty FormData in
+        // production, most likely a proxy-level body size limit ahead of
+        // the app truncating it before Next.js ever saw it.
+        const mimeType = file.type || "text/csv";
+        const { uploadUrl, s3Key } = await getImportUploadUrlAction(file.name, mimeType);
+
+        const putResponse = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": mimeType },
+        });
+        if (!putResponse.ok) {
+          throw new Error("Upload to storage failed. Please try again.");
+        }
+
+        const result = await createImportJobAction({
+          brokerAccountId,
+          brokerCode,
+          fileName: file.name,
+          mimeType,
+          s3Key,
+        });
+        setUploadState(result);
+      } catch (error) {
+        setUploadState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Upload failed. Please try again.",
+        });
+      }
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -47,10 +110,7 @@ export function ImportWizard({
             <CardTitle>1–2. Select broker &amp; upload file</CardTitle>
           </CardHeader>
           <CardContent>
-            <form action={uploadFormAction} className="space-y-4">
-              <input type="hidden" name="brokerAccountId" value={brokerAccountId} />
-              <input type="hidden" name="brokerCode" value={brokerCode} />
-
+            <form onSubmit={handleUploadSubmit} className="space-y-4">
               <div className="rounded-md border border-surface-border bg-surface-muted px-3 py-2 text-sm">
                 Broker: <span className="font-medium">{brokerName}</span> · Report type:{" "}
                 <span className="font-medium">Tradebook</span>
@@ -61,8 +121,8 @@ export function ImportWizard({
                 className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-surface-border bg-surface px-6 py-10 text-center hover:bg-surface-muted"
               >
                 <UploadCloud className="h-8 w-8 text-muted-foreground" />
-                {selectedFileName ? (
-                  <span className="text-sm font-medium text-foreground">{selectedFileName}</span>
+                {selectedFile ? (
+                  <span className="text-sm font-medium text-foreground">{selectedFile.name}</span>
                 ) : (
                   <span className="text-sm font-medium">Click to select a .csv or .xlsx file</span>
                 )}
@@ -74,7 +134,7 @@ export function ImportWizard({
                   accept=".csv,.xlsx"
                   className="hidden"
                   required
-                  onChange={(e) => setSelectedFileName(e.target.files?.[0]?.name ?? null)}
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
                 />
               </label>
 

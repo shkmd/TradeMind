@@ -2,67 +2,70 @@
 
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/auth/rbac";
-import { uploadAndPreviewImport, confirmImport, rollbackImportJob } from "@/server/services/import.service";
+import {
+  createImportUploadUrl,
+  createImportJobAndPreview,
+  confirmImport,
+  rollbackImportJob,
+} from "@/server/services/import.service";
+import type { SupportedFileType } from "@/lib/brokers/adapter";
 import type { ImportPreview } from "@/lib/import/preview";
 import type { ImportResult } from "@/lib/import/pipeline";
 
-export type UploadImportState = {
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+
+/**
+ * Step 1 of 2: get a short-lived signed URL so the browser can PUT the file
+ * straight to storage. See getSignedImportUploadUrl's doc comment for why —
+ * sending the file through a server action's request body hit an empty-body
+ * failure in production for a real ~11,000-row file, most likely a
+ * proxy-level size limit ahead of the app.
+ */
+export async function getImportUploadUrlAction(
+  fileName: string,
+  mimeType: string
+): Promise<{ uploadUrl: string; s3Key: string }> {
+  const session = await requireSession();
+  return createImportUploadUrl(session.user.id, fileName, mimeType);
+}
+
+export type CreateImportJobState = {
   status: "idle" | "error" | "success";
   message?: string;
   importJobId?: string;
   preview?: ImportPreview;
 };
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
-
-export async function uploadImportAction(
-  _prevState: UploadImportState,
-  formData: FormData
-): Promise<UploadImportState> {
+/**
+ * Step 2 of 2: called once the browser has already PUT the file to `s3Key`.
+ * This request body is just a handful of strings, never the file itself, so
+ * it can't hit the same body-size problem.
+ */
+export async function createImportJobAction(input: {
+  brokerAccountId: string;
+  brokerCode: string;
+  fileName: string;
+  mimeType: string;
+  s3Key: string;
+}): Promise<CreateImportJobState> {
   const session = await requireSession();
 
-  const brokerAccountId = formData.get("brokerAccountId");
-  const brokerCode = formData.get("brokerCode");
-  const file = formData.get("file");
-
-  if (typeof brokerAccountId !== "string" || typeof brokerCode !== "string" || !brokerAccountId || !brokerCode) {
-    // Temporary diagnostic: this check has been failing for at least one
-    // real user despite the hidden inputs looking correct in SSR HTML and a
-    // fresh end-to-end repro working fine. Logging exactly what FormData
-    // actually contained server-side, to tell a genuinely-empty field apart
-    // from something odder (wrong key name, a stale/duplicate field, etc).
-    console.error("[uploadImportAction] Missing broker account — FormData keys received:", {
-      keys: Array.from(formData.keys()),
-      brokerAccountId,
-      brokerCode,
-      userId: session.user.id,
-    });
-    return { status: "error", message: "Missing broker account." };
-  }
-  if (!(file instanceof File) || file.size === 0) {
-    return { status: "error", message: "Select a Tradebook file to upload." };
-  }
-  if (file.size > MAX_FILE_SIZE_BYTES) {
-    return { status: "error", message: "File is too large (max 10MB)." };
-  }
-
-  const lowerName = file.name.toLowerCase();
+  const lowerName = input.fileName.toLowerCase();
   if (!lowerName.endsWith(".csv") && !lowerName.endsWith(".xlsx")) {
     return { status: "error", message: "Only .csv or .xlsx files are supported." };
   }
-  const fileType = lowerName.endsWith(".xlsx") ? "xlsx" : "csv";
-
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const fileType: SupportedFileType = lowerName.endsWith(".xlsx") ? "xlsx" : "csv";
 
   try {
-    const { importJobId, preview } = await uploadAndPreviewImport({
+    const { importJobId, preview } = await createImportJobAndPreview({
       userId: session.user.id,
-      brokerAccountId,
-      brokerCode,
-      fileName: file.name,
+      brokerAccountId: input.brokerAccountId,
+      brokerCode: input.brokerCode,
+      fileName: input.fileName,
       fileType,
-      mimeType: file.type || "text/csv",
-      buffer,
+      mimeType: input.mimeType || "text/csv",
+      s3Key: input.s3Key,
+      maxSizeBytes: MAX_FILE_SIZE_BYTES,
     });
 
     return { status: "success", importJobId, preview };

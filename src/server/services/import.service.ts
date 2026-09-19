@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
-import { uploadImportFile, downloadImportFile } from "@/lib/storage/s3";
+import { downloadImportFile, getSignedImportUploadUrl } from "@/lib/storage/s3";
 import { previewImport, type ImportPreview } from "@/lib/import/preview";
 import { runImportPipeline, type ImportResult } from "@/lib/import/pipeline";
 import { regenerateTradesForInstruments } from "@/lib/import/execution-ingest";
@@ -25,23 +25,50 @@ export async function getImportJob(userId: string, id: string) {
   });
 }
 
-interface UploadAndPreviewInput {
+/**
+ * Reserves a storage key and returns a short-lived signed PUT URL so the
+ * browser can upload the tradebook file directly to R2 — see
+ * getSignedImportUploadUrl's doc comment for why this bypasses our server
+ * entirely rather than going through a server action's request body.
+ */
+export async function createImportUploadUrl(
+  userId: string,
+  fileName: string,
+  mimeType: string
+): Promise<{ uploadUrl: string; s3Key: string }> {
+  const s3Key = `imports/${userId}/${Date.now()}-${fileName}`;
+  const uploadUrl = await getSignedImportUploadUrl(s3Key, mimeType);
+  return { uploadUrl, s3Key };
+}
+
+interface CreateImportJobInput {
   userId: string;
   brokerAccountId: string;
   brokerCode: string;
   fileName: string;
   fileType: SupportedFileType;
   mimeType: string;
-  buffer: Buffer;
+  s3Key: string;
+  /** Enforced here, not just client-side, since the client's own check is trivially bypassable. */
+  maxSizeBytes?: number;
 }
 
-/** Uploads the file, creates the ImportJob (status UPLOADED), and runs a read-only preview. */
-export async function uploadAndPreviewImport(
-  input: UploadAndPreviewInput
+/**
+ * Given a file the browser has already uploaded to `s3Key` (see
+ * createImportUploadUrl), creates the ImportJob (status UPLOADED) and runs a
+ * read-only preview. Downloads the file back from storage once, server-side,
+ * to compute its checksum and feed the parser — that read is a normal
+ * outbound request our server makes on its own terms, not something a
+ * client's inbound body size limit can truncate.
+ */
+export async function createImportJobAndPreview(
+  input: CreateImportJobInput
 ): Promise<{ importJobId: string; preview: ImportPreview }> {
-  const checksum = createHash("sha256").update(input.buffer).digest("hex");
-  const s3Key = `imports/${input.userId}/${Date.now()}-${input.fileName}`;
-  await uploadImportFile(s3Key, input.buffer, input.mimeType);
+  const buffer = await downloadImportFile(input.s3Key);
+  if (input.maxSizeBytes && buffer.byteLength > input.maxSizeBytes) {
+    throw new Error(`File is too large (max ${Math.floor(input.maxSizeBytes / (1024 * 1024))}MB).`);
+  }
+  const checksum = createHash("sha256").update(buffer).digest("hex");
 
   const importJob = await prisma.importJob.create({
     data: {
@@ -53,17 +80,17 @@ export async function uploadAndPreviewImport(
       files: {
         create: {
           originalName: input.fileName,
-          s3Key,
+          s3Key: input.s3Key,
           s3Bucket: process.env.S3_BUCKET_IMPORTS ?? "trademind-imports",
           mimeType: input.mimeType,
-          sizeBytes: input.buffer.byteLength,
+          sizeBytes: buffer.byteLength,
           checksumSha256: checksum,
         },
       },
     },
   });
 
-  const preview = await previewImport(input.brokerCode, input.brokerAccountId, input.buffer, input.fileType);
+  const preview = await previewImport(input.brokerCode, input.brokerAccountId, buffer, input.fileType);
 
   return { importJobId: importJob.id, preview };
 }

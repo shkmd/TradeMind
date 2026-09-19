@@ -37,3 +37,21 @@ export async function getSignedImportFileUrl(key: string): Promise<string> {
     expiresIn: 300,
   });
 }
+
+/**
+ * Signed URL for the browser to PUT a tradebook file directly to storage,
+ * bypassing our Next.js server body entirely. A real ~11,000-row Angel One
+ * file sent through a server action's multipart body arrived at the server
+ * as a completely empty FormData in production — most likely a proxy-level
+ * body size limit ahead of the app silently truncating it — even though the
+ * app's own bodySizeLimit config allowed it. Direct-to-storage upload
+ * sidesteps that whole class of problem, which is also just the standard
+ * pattern for file uploads through an app-router server.
+ */
+export async function getSignedImportUploadUrl(key: string, contentType: string): Promise<string> {
+  return getSignedUrl(
+    s3Client,
+    new PutObjectCommand({ Bucket: IMPORTS_BUCKET, Key: key, ContentType: contentType }),
+    { expiresIn: 300 }
+  );
+}
