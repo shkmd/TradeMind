@@ -1,0 +1,46 @@
+// ── Reports, notifications, audit ──────────────────────────────────────
+
+model Report {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String // DAILY | WEEKLY | MONTHLY | FINANCIAL_YEAR | STRATEGY | TAX_SUMMARY | ...
+  format      String   @default("PDF") // PDF | XLSX | CSV
+  periodStart DateTime?
+  periodEnd   DateTime?
+  s3Key       String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // IMPORT_COMPLETED | IMPORT_FAILED | DUPLICATE_DETECTED | RISK_LIMIT_APPROACHED | ...
+  title     String
+  body      String?   @db.Text
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+}

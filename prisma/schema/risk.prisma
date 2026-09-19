@@ -1,0 +1,139 @@
+// ── Risk, rules, behaviour ─────────────────────────────────────────────
+
+model RiskProfile {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  maxRiskPerTradePct    Decimal? @db.Decimal(5, 2)
+  maxDailyLossAmount    Decimal? @db.Decimal(18, 2)
+  maxWeeklyLossAmount   Decimal? @db.Decimal(18, 2)
+  maxTradesPerDay       Int?
+  maxConsecutiveLosses  Int?
+  maxProfitGiveBackPct  Decimal? @db.Decimal(5, 2)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Wired this phase for 4 rule types (see TradingRuleType). The remaining
+/// ~12 rule types from the spec (max daily/weekly loss, position size,
+/// no-averaging, cooldown, etc.) reuse this same shape via `config` — no
+/// migration needed to add them, just new enum values + evaluators.
+enum TradingRuleType {
+  MAX_TRADES_PER_DAY
+  MAX_LOSS_PER_TRADE_PERCENT
+  JOURNAL_COMPLETION_REQUIRED
+  MIN_RISK_REWARD_RATIO
+}
+
+model TradingRule {
+  id        String          @id @default(cuid())
+  userId    String
+  ruleType  TradingRuleType
+  name      String
+  config    Json
+  scope     String          @default("GLOBAL") // GLOBAL | ACCOUNT | STRATEGY
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evaluations RuleEvaluation[]
+
+  @@index([userId])
+}
+
+enum RuleEvalResult {
+  PASS
+  FAIL
+  NOT_APPLICABLE
+}
+
+model RuleEvaluation {
+  id            String         @id @default(cuid())
+  tradeId       String
+  tradingRuleId String
+  result        RuleEvalResult
+  details       Json?
+  evaluatedAt   DateTime       @default(now())
+
+  trade     Trade           @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  rule      TradingRule     @relation(fields: [tradingRuleId], references: [id], onDelete: Cascade)
+  violation RuleViolation?
+
+  @@unique([tradeId, tradingRuleId])
+  @@index([tradeId])
+}
+
+model RuleViolation {
+  id               String   @id @default(cuid())
+  ruleEvaluationId String   @unique
+  financialCost    Decimal? @db.Decimal(18, 2)
+  description      String?
+  createdAt        DateTime @default(now())
+
+  ruleEvaluation RuleEvaluation @relation(fields: [ruleEvaluationId], references: [id], onDelete: Cascade)
+}
+
+/// Stub — the Behavioural Loss Engine (revenge trading, overtrading, FOMO,
+/// etc, 14+ patterns) is a later phase. Shape is generic enough to seed
+/// illustrative rows for the Behavioural Losses page now.
+model BehaviourEvent {
+  id            String   @id @default(cuid())
+  userId        String
+  patternCode   String // REVENGE_TRADING | OVERTRADING | FOMO | ...
+  occurredAt    DateTime
+  financialImpact Decimal? @db.Decimal(18, 2)
+  details       Json?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// The process score (not the trade's financial outcome). Written whenever
+/// a trade's journal/rules are (re-)evaluated.
+model DisciplineScore {
+  id        String   @id @default(cuid())
+  userId    String
+  tradeId   String?
+  score     Int
+  breakdown Json?
+  computedAt DateTime @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trade Trade? @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tradeId])
+}
+
+/// Stub — populated by a later phase's drawdown-tracking job.
+model DrawdownPeriod {
+  id              String    @id @default(cuid())
+  userId          String
+  peakCapital     Decimal   @db.Decimal(18, 2)
+  troughCapital   Decimal?  @db.Decimal(18, 2)
+  startedAt       DateTime
+  recoveredAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Stub — the retrospective Scenario Simulator is a later phase.
+model ScenarioSimulation {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String
+  parameters Json
+  results    Json?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

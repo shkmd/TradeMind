@@ -1,0 +1,32 @@
+// ── Billing ─────────────────────────────────────────────────────────────
+// Razorpay wiring deferred to a later phase; this shape lets every user
+// have a Subscription row from day one (defaults to FREE) without a
+// migration when Billing goes live.
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PRO
+  MENTOR
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String             @unique
+  plan                   SubscriptionPlan   @default(FREE)
+  status                 SubscriptionStatus @default(ACTIVE)
+  razorpaySubscriptionId String?
+  razorpayCustomerId     String?
+  currentPeriodEnd       DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

@@ -1,0 +1,126 @@
+// ── Journal ─────────────────────────────────────────────────────────────
+
+model Emotion {
+  id    String @id @default(cuid())
+  code  String @unique // CALM, CONFIDENT, ANXIOUS, FOMO, REVENGE, BORED, FRUSTRATED, EUPHORIC
+  label String
+
+  tradeJournals TradeJournal[]
+  dailyJournals DailyJournal[]
+}
+
+model Mistake {
+  id    String @id @default(cuid())
+  code  String @unique // MOVED_STOP, OVERSIZED, NO_STOP, FOMO_ENTRY, REVENGE_TRADE, EARLY_EXIT, LATE_EXIT, NO_PLAN
+  label String
+
+  tradeJournalMistakes TradeJournalMistake[]
+}
+
+model Tag {
+  id     String @id @default(cuid())
+  userId String
+  name   String
+  color  String @default("#0E3B2E")
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradesTagged   TagOnTrade[]
+
+  @@unique([userId, name])
+}
+
+model TagOnTrade {
+  id      String @id @default(cuid())
+  tradeId String
+  tagId   String
+
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, tagId])
+}
+
+/// Pre-trade + post-trade journal, one per Trade. Wired this phase: filling
+/// this in (plus its completedAt) feeds the process score and the
+/// JOURNAL_COMPLETION_REQUIRED rule.
+model TradeJournal {
+  id     String @id @default(cuid())
+  tradeId String @unique
+  userId String
+
+  // Pre-trade
+  setupNotes      String?  @db.Text
+  entryReason     String?  @db.Text
+  plannedStopLoss Decimal? @db.Decimal(18, 4)
+  plannedTarget   Decimal? @db.Decimal(18, 4)
+  confidenceLevel Int?
+
+  // Post-trade
+  exitReason      String?  @db.Text
+  setupFollowed   Boolean?
+  stopLossFollowed Boolean?
+  whatWentWell    String?  @db.Text
+  whatWentWrong   String?  @db.Text
+  lessonLearned   String?  @db.Text
+  rating          Int?
+
+  emotionId   String?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  trade    Trade                 @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  user     User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emotion  Emotion?              @relation(fields: [emotionId], references: [id])
+  mistakes TradeJournalMistake[]
+
+  @@index([userId])
+}
+
+model TradeJournalMistake {
+  id             String @id @default(cuid())
+  tradeJournalId String
+  mistakeId      String
+
+  tradeJournal TradeJournal @relation(fields: [tradeJournalId], references: [id], onDelete: Cascade)
+  mistake      Mistake      @relation(fields: [mistakeId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeJournalId, mistakeId])
+}
+
+model DailyJournal {
+  id                 String   @id @default(cuid())
+  userId             String
+  journalDate        DateTime @db.Date
+  marketOutlook      String?  @db.Text
+  maxDailyLoss        Decimal? @db.Decimal(18, 2)
+  maxTrades          Int?
+  plannedInstruments String[] @default([])
+  importantEvents    String?  @db.Text
+  energyLevel        Int?
+  openingEmotionId   String?
+  endOfDayReflection String?  @db.Text
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  openingEmotion Emotion? @relation(fields: [openingEmotionId], references: [id])
+
+  @@unique([userId, journalDate])
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  userId    String
+  tradeId   String?
+  s3Key     String
+  s3Bucket  String
+  mimeType  String
+  label     String?
+  createdAt DateTime @default(now())
+
+  trade Trade? @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tradeId])
+}

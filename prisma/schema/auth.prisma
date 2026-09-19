@@ -1,0 +1,171 @@
+// ── Identity, sessions, roles ──────────────────────────────────────────────
+// Auth.js v5 database-session strategy: User/Account/Session/VerificationToken
+// field names and shapes follow the @auth/prisma-adapter contract exactly.
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  passwordHash  String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  accounts        Account[]
+  sessions        Session[]
+  deviceSessions  DeviceSession[]
+  twoFactorSecret TwoFactorSecret?
+  profile         Profile?
+  userRoles       UserRole[]
+  subscription    Subscription?
+
+  brokerAccounts BrokerAccount[]
+  importJobs     ImportJob[]
+  importMappings ImportMapping[]
+
+  trades           Trade[]
+  tradeJournals    TradeJournal[]
+  dailyJournals    DailyJournal[]
+  tags             Tag[]
+  investmentTheses InvestmentThesis[]
+  holdings         Holding[]
+
+  riskProfile      RiskProfile?
+  tradingRules     TradingRule[]
+  behaviourEvents  BehaviourEvent[]
+  disciplineScores DisciplineScore[]
+  drawdownPeriods  DrawdownPeriod[]
+  scenarioSims     ScenarioSimulation[]
+
+  aiConversations AIConversation[]
+  aiInsights      AIInsight[]
+  reports         Report[]
+
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// Device/session visibility for the Settings > Security page. Populated on
+/// every sign-in; no management UI (revoke) is built in this phase.
+model DeviceSession {
+  id           String    @id @default(cuid())
+  userId       String
+  sessionToken String?
+  userAgent    String?
+  ipAddress    String?
+  deviceLabel  String?
+  lastActiveAt DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// TOTP secret storage, schema-only this phase (no setup/verify UI yet).
+/// secretEncrypted must always be encrypted at rest, never plaintext.
+model TwoFactorSecret {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  secretEncrypted String
+  enabled         Boolean   @default(false)
+  verifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum RoleKey {
+  TRADER
+  MENTOR
+  ACCOUNTANT
+  ADMINISTRATOR
+}
+
+model Role {
+  id        String     @id @default(cuid())
+  key       RoleKey    @unique
+  name      String
+  userRoles UserRole[]
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+}
+
+model Profile {
+  id                    String    @id @default(cuid())
+  userId                String    @unique
+  displayName           String
+  baseCurrency          String    @default("INR")
+  timezone              String    @default("Asia/Kolkata")
+  fyStartMonth          Int       @default(4)
+  experienceLevel       String?
+  traderProfileType     String?
+  marketsTraded         String[]  @default([])
+  startingCapital       Decimal?  @db.Decimal(18, 2)
+  maxRiskPerTradePct    Decimal?  @db.Decimal(5, 2)
+  maxDailyLossAmount    Decimal?  @db.Decimal(18, 2)
+  maxWeeklyLossAmount   Decimal?  @db.Decimal(18, 2)
+  maxTradesPerDay       Int?
+  minRiskRewardRatio    Decimal?  @db.Decimal(5, 2)
+  onboardingCompletedAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

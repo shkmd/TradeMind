@@ -1,0 +1,70 @@
+// ── Brokers ─────────────────────────────────────────────────────────────
+
+model Broker {
+  id            String  @id @default(cuid())
+  code          String  @unique // ZERODHA, DHAN, UPSTOX, ANGEL_ONE, FYERS, GROWW, GENERIC_CSV
+  name          String
+  isImplemented Boolean @default(false)
+  logoUrl       String?
+
+  brokerAccounts BrokerAccount[]
+}
+
+enum BrokerAccountType {
+  MANUAL_IMPORT
+  API_CONNECTED
+  MANUAL_ENTRY
+}
+
+model BrokerAccount {
+  id               String            @id @default(cuid())
+  userId           String
+  brokerId         String
+  nickname         String
+  accountType      BrokerAccountType @default(MANUAL_IMPORT)
+  externalClientId String? // masked client id, display-only, never a credential
+  currency         String            @default("INR")
+  startingCapital  Decimal?          @db.Decimal(18, 2)
+  isManualOrAlgo   String            @default("MANUAL") // MANUAL | ALGO
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broker      Broker             @relation(fields: [brokerId], references: [id])
+  connections BrokerConnection[]
+  importJobs  ImportJob[]
+  orders      Order[]
+  executions  Execution[]
+  trades      Trade[]
+  holdings    Holding[]
+
+  @@index([userId])
+}
+
+enum BrokerConnectionType {
+  CSV_IMPORT
+  API_OAUTH
+  MANUAL
+}
+
+/// Read-only broker connections only. No password/PIN/TOTP is ever stored here —
+/// accessTokenEncrypted/refreshTokenEncrypted are reserved for a future official
+/// OAuth broker integration and remain null for CSV-based accounts.
+model BrokerConnection {
+  id                    String                @id @default(cuid())
+  brokerAccountId       String
+  connectionType        BrokerConnectionType  @default(CSV_IMPORT)
+  status                String                @default("ACTIVE")
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  brokerAccount BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+
+  @@index([brokerAccountId])
+}

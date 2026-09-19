@@ -1,0 +1,53 @@
+// ── Instrument master ──────────────────────────────────────────────────
+
+model Exchange {
+  id      String @id @default(cuid())
+  code    String @unique // NSE, BSE, MCX
+  name    String
+  country String @default("IN")
+
+  instruments Instrument[]
+}
+
+enum InstrumentSegment {
+  EQUITY
+  FUTURES
+  OPTIONS
+  CURRENCY
+  COMMODITY
+  MUTUAL_FUND
+}
+
+enum OptionType {
+  CE
+  PE
+}
+
+model Instrument {
+  id         String            @id @default(cuid())
+  exchangeId String
+  symbol     String
+  isin       String?
+  name       String?
+  segment    InstrumentSegment @default(EQUITY)
+  series     String?
+  sector     String?
+  lotSize    Int               @default(1)
+  tickSize   Decimal?          @db.Decimal(10, 4)
+  underlying String? // for derivatives, the underlying symbol (e.g. NIFTY)
+  expiryDate DateTime?
+  strikePrice Decimal?         @db.Decimal(18, 2)
+  optionType OptionType?
+  isActive   Boolean           @default(true)
+  createdAt  DateTime          @default(now())
+
+  exchange   Exchange     @relation(fields: [exchangeId], references: [id])
+  orders     Order[]
+  executions Execution[]
+  trades     Trade[]
+  holdings   Holding[]
+
+  @@unique([exchangeId, symbol, segment])
+  @@index([isin])
+  @@index([symbol])
+}

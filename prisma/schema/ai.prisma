@@ -1,0 +1,49 @@
+// ── AI Coach ────────────────────────────────────────────────────────────
+// Stub — the AI Coach (chat, insights, weekly/monthly reports) is a later
+// phase. Every AI answer must cite InsightEvidence rows linking back to
+// real Trade/Journal records — that constraint shapes this schema now even
+// though nothing writes to it yet.
+
+model AIConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String?
+  createdAt DateTime @default(now())
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  insights AIInsight[]
+
+  @@index([userId])
+}
+
+model AIInsight {
+  id              String   @id @default(cuid())
+  userId          String
+  conversationId  String?
+  question        String?  @db.Text
+  finding         String   @db.Text
+  dateRangeStart  DateTime?
+  dateRangeEnd    DateTime?
+  sampleSize      Int?
+  financialImpact Decimal? @db.Decimal(18, 2)
+  confidenceLevel String? // LOW | MEDIUM | HIGH
+  suggestedAction String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation AIConversation? @relation(fields: [conversationId], references: [id])
+  evidence     InsightEvidence[]
+
+  @@index([userId])
+}
+
+model InsightEvidence {
+  id          String @id @default(cuid())
+  insightId   String
+  tradeId     String?
+  description String?
+
+  insight AIInsight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@index([insightId])
+}

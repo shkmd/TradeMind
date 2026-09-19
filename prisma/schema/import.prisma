@@ -1,0 +1,116 @@
+// ── Import pipeline ─────────────────────────────────────────────────────
+
+enum ImportJobStatus {
+  PENDING
+  UPLOADED
+  PARSING
+  VALIDATED
+  REVIEW
+  CONFIRMED
+  COMPLETED
+  FAILED
+  ROLLED_BACK
+}
+
+model ImportJob {
+  id              String          @id @default(cuid())
+  userId          String
+  brokerAccountId String
+  broker          String // denormalized broker code at import time
+  reportType      String          @default("TRADEBOOK") // TRADEBOOK | HOLDINGS | PNL | CONTRACT_NOTE
+  status          ImportJobStatus @default(PENDING)
+  totalRows       Int             @default(0)
+  validRows       Int             @default(0)
+  invalidRows     Int             @default(0)
+  duplicateRows   Int             @default(0)
+  tradesGenerated Int             @default(0)
+  parserVersion   String          @default("zerodha-tradebook-v1")
+  startedAt       DateTime?
+  completedAt     DateTime?
+  errorMessage    String?
+  rolledBackAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerAccount        BrokerAccount          @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  files                ImportFile[]
+  rows                 ImportRow[]
+  reconciliationIssues ReconciliationIssue[]
+
+  @@index([userId])
+  @@index([brokerAccountId])
+}
+
+model ImportFile {
+  id             String   @id @default(cuid())
+  importJobId    String
+  originalName   String
+  s3Key          String
+  s3Bucket       String
+  mimeType       String
+  sizeBytes      Int
+  checksumSha256 String
+  createdAt      DateTime @default(now())
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+}
+
+enum ImportRowStatus {
+  PENDING
+  VALID
+  INVALID
+  DUPLICATE
+  SKIPPED
+  IMPORTED
+}
+
+model ImportRow {
+  id          String          @id @default(cuid())
+  importJobId String
+  rowNumber   Int
+  rawData     Json
+  status      ImportRowStatus @default(PENDING)
+  errors      Json?
+  fingerprint String?
+  isDuplicate Boolean         @default(false)
+  executionId String?         @unique
+  createdAt   DateTime        @default(now())
+
+  importJob ImportJob  @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+  execution Execution? @relation(fields: [executionId], references: [id])
+
+  @@index([importJobId, status])
+}
+
+/// Reserved for the future dynamic column-mapper UI (non-Zerodha brokers).
+/// Unused this phase — Zerodha uses a fixed column map.
+model ImportMapping {
+  id         String   @id @default(cuid())
+  userId     String
+  brokerCode String
+  columnMap  Json
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, brokerCode])
+}
+
+/// Stub for Phase 2+ broker-report reconciliation (comparing totals against
+/// the broker's own P&L/holdings statement). Not populated this phase.
+model ReconciliationIssue {
+  id          String    @id @default(cuid())
+  importJobId String
+  type        String
+  description String
+  severity    String    @default("INFO")
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  importJob ImportJob @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+}

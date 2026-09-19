@@ -1,0 +1,174 @@
+// ── Orders, executions, trades ─────────────────────────────────────────
+// Executions are immutable, broker-sourced records (never edited after
+// import — only soft-deleted via an import rollback). Trades are derived
+// from Executions via FIFO grouping and may be recomputed.
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+model Order {
+  id              String     @id @default(cuid())
+  brokerAccountId String
+  instrumentId    String
+  brokerOrderId   String
+  orderType       String?
+  side            TradeSide
+  quantity        Int
+  price           Decimal?   @db.Decimal(18, 4)
+  status          String?
+  placedAt        DateTime?
+  createdAt       DateTime   @default(now())
+
+  brokerAccount BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  instrument    Instrument    @relation(fields: [instrumentId], references: [id])
+  executions    Execution[]
+
+  @@unique([brokerAccountId, brokerOrderId])
+  @@index([brokerAccountId])
+}
+
+/// One row per broker fill. Immutable once created — corrections happen by
+/// rolling back the owning ImportJob, never by editing a row in place.
+model Execution {
+  id              String    @id @default(cuid())
+  brokerAccountId String
+  instrumentId    String
+  orderId         String?
+  brokerTradeId   String
+  brokerOrderId   String
+  side            TradeSide
+  quantity        Int
+  price           Decimal   @db.Decimal(18, 4)
+  exchange        String
+  segment         String
+  series          String?
+  executedAt      DateTime
+  /// sha256(brokerAccountId, exchange, brokerTradeId, brokerOrderId, executedAt, symbol, side, quantity, price)
+  fingerprint     String    @unique
+  createdAt       DateTime  @default(now())
+  deletedAt       DateTime?
+
+  brokerAccount   BrokerAccount    @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  instrument      Instrument       @relation(fields: [instrumentId], references: [id])
+  order           Order?           @relation(fields: [orderId], references: [id])
+  importRow       ImportRow?
+  tradeExecutions TradeExecution[]
+
+  @@index([brokerAccountId, instrumentId, executedAt])
+  @@index([fingerprint])
+}
+
+enum TradeProductType {
+  INTRADAY
+  DELIVERY
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+  PARTIALLY_CLOSED
+}
+
+model Trade {
+  id                  String            @id @default(cuid())
+  userId              String
+  brokerAccountId     String
+  instrumentId        String
+  strategyId          String? // future options-strategy grouping (Phase 3)
+  side                TradeSide // side of the opening leg (BUY = long, SELL = short)
+  productType         TradeProductType
+  status              TradeStatus       @default(OPEN)
+  openedAt            DateTime
+  closedAt            DateTime?
+  quantity            Int
+  entryAvgPrice       Decimal           @db.Decimal(18, 4)
+  exitAvgPrice        Decimal?          @db.Decimal(18, 4)
+  grossPnl            Decimal?          @db.Decimal(18, 2)
+  totalCharges        Decimal?          @db.Decimal(18, 2)
+  netPnl              Decimal?          @db.Decimal(18, 2)
+  chargeBreakdown     Json?
+  processScore        Int?
+  ruleComplianceScore Int?
+  setup               String?
+  strategyTag         String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  deletedAt           DateTime?
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerAccount   BrokerAccount     @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  instrument      Instrument        @relation(fields: [instrumentId], references: [id])
+  strategy        Strategy?         @relation(fields: [strategyId], references: [id])
+  tradeExecutions TradeExecution[]
+  journal         TradeJournal?
+  ruleEvaluations RuleEvaluation[]
+  disciplineScores DisciplineScore[]
+  tags            TagOnTrade[]
+  attachments     Attachment[]
+
+  @@index([userId, closedAt])
+  @@index([brokerAccountId])
+  @@index([instrumentId])
+}
+
+enum TradeExecutionRole {
+  ENTRY
+  EXIT
+}
+
+model TradeExecution {
+  id              String              @id @default(cuid())
+  tradeId         String
+  executionId     String
+  role            TradeExecutionRole
+  matchedQuantity Int
+  createdAt       DateTime            @default(now())
+
+  trade     Trade     @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  execution Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, executionId, role])
+  @@index([tradeId])
+  @@index([executionId])
+}
+
+/// Stub — requires a live/last-traded-price feed to be meaningful. Not
+/// populated or displayed this phase (see dashboard KPI scope note).
+model Position {
+  id              String   @id @default(cuid())
+  userId          String
+  brokerAccountId String
+  instrumentId    String
+  quantity        Int
+  avgCostPrice    Decimal  @db.Decimal(18, 4)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// Stub — Phase 3 automatic options-strategy detection (straddle, spreads,
+/// iron condor, etc). A Trade may optionally belong to a Strategy once
+/// that engine exists; unused this phase.
+model Strategy {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String?
+  strategyType String?
+  createdAt    DateTime @default(now())
+
+  legs   StrategyLeg[]
+  trades Trade[]
+}
+
+model StrategyLeg {
+  id         String   @id @default(cuid())
+  strategyId String
+  tradeId    String?
+  legRole    String?
+  createdAt  DateTime @default(now())
+
+  strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId])
+}

@@ -1,0 +1,131 @@
+// ── Portfolio / holdings ────────────────────────────────────────────────
+// Stub-level detail this phase (illustrative seed rows only). Full
+// consolidation-by-ISIN, corporate-action replay, and XIRR/CAGR live in a
+// later phase; the shapes below just avoid a destructive migration then.
+
+model Holding {
+  id              String   @id @default(cuid())
+  userId          String
+  brokerAccountId String
+  instrumentId    String
+  quantity        Decimal  @db.Decimal(18, 4)
+  avgCostPrice    Decimal  @db.Decimal(18, 4)
+  currentPrice    Decimal? @db.Decimal(18, 4)
+  assetClass      String   @default("EQUITY") // EQUITY | ETF | MUTUAL_FUND | BOND | SGB | REIT_INVIT | OTHER
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerAccount BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  instrument    Instrument    @relation(fields: [instrumentId], references: [id])
+  lots          HoldingLot[]
+  thesis        InvestmentThesis?
+  dividends     Dividend[]
+
+  @@index([userId])
+  @@index([brokerAccountId])
+}
+
+model HoldingLot {
+  id          String   @id @default(cuid())
+  holdingId   String
+  quantity    Decimal  @db.Decimal(18, 4)
+  price       Decimal  @db.Decimal(18, 4)
+  acquiredAt  DateTime
+  createdAt   DateTime @default(now())
+
+  holding Holding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+
+  @@index([holdingId])
+}
+
+model InvestmentTransaction {
+  id              String   @id @default(cuid())
+  userId          String
+  brokerAccountId String
+  instrumentId    String?
+  type            String // BUY | SELL | DIVIDEND | RIGHTS | BONUS | SPLIT | MERGER | DEMERGER
+  quantity        Decimal? @db.Decimal(18, 4)
+  price           Decimal? @db.Decimal(18, 4)
+  amount          Decimal? @db.Decimal(18, 2)
+  transactedAt    DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([brokerAccountId])
+}
+
+/// An internal transfer between the user's own broker/demat accounts.
+/// Deliberately NOT a Trade or InvestmentTransaction — must never be
+/// counted as a sale, purchase, profit, or new capital (acceptance
+/// criterion). Unused this phase; kept in the schema so that invariant is
+/// structurally enforced once transfers are implemented.
+model AssetTransfer {
+  id                  String   @id @default(cuid())
+  userId              String
+  instrumentId        String
+  fromBrokerAccountId String?
+  toBrokerAccountId   String?
+  quantity            Decimal  @db.Decimal(18, 4)
+  transferredAt       DateTime
+  createdAt           DateTime @default(now())
+
+  @@index([userId])
+}
+
+model CorporateAction {
+  id           String   @id @default(cuid())
+  instrumentId String
+  type         String // SPLIT | BONUS | DIVIDEND | RIGHTS | BUYBACK | MERGER | DEMERGER | SYMBOL_CHANGE | ISIN_CHANGE
+  ratio        String?
+  exDate       DateTime
+  details      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([instrumentId])
+}
+
+model Dividend {
+  id          String   @id @default(cuid())
+  holdingId   String
+  amount      Decimal  @db.Decimal(18, 2)
+  perShare    Decimal? @db.Decimal(18, 4)
+  paidAt      DateTime
+  createdAt   DateTime @default(now())
+
+  holding Holding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+
+  @@index([holdingId])
+}
+
+enum ThesisStatus {
+  ACTIVE
+  UNDER_REVIEW
+  STRENGTHENING
+  WEAKENING
+  BROKEN
+  EXITED
+}
+
+model InvestmentThesis {
+  id                   String       @id @default(cuid())
+  userId               String
+  holdingId            String       @unique
+  purchaseReason       String?      @db.Text
+  thesis               String?      @db.Text
+  expectedHoldingPeriod String?
+  targetAllocationPct  Decimal?     @db.Decimal(5, 2)
+  risks                String?      @db.Text
+  exitConditions       String?      @db.Text
+  confidenceScore      Int?
+  status               ThesisStatus @default(ACTIVE)
+  reviewFrequency      String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  holding Holding @relation(fields: [holdingId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

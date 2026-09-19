@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 160 30% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 160 30% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 160 30% 10%;
+
+    --primary: 160 58% 15%;
+    --primary-foreground: 120 15% 97%;
+
+    --secondary: 120 8% 95%;
+    --secondary-foreground: 160 30% 10%;
+
+    --muted: 120 8% 95%;
+    --muted-foreground: 160 10% 40%;
+
+    --accent: 120 8% 93%;
+    --accent-foreground: 160 30% 10%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 120 10% 89%;
+    --input: 120 10% 89%;
+    --ring: 160 58% 25%;
+
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-surface text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer utilities {
+  .financial-figure {
+    @apply font-serif tabular-nums;
+  }
+}
