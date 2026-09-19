@@ -231,7 +231,7 @@ function reportLocationHint(brokerCode: string): string {
     ZERODHA: "Zerodha Console → Reports → Tradebook",
     DHAN: "web.dhan.co → Reports → Trade History",
     UPSTOX: "Upstox Pro Web → Reports → Trade History",
-    ANGEL_ONE: "Angel One Web → Download Reports → Trades and Charges (.xlsx only — equity rows only, F&O not yet supported)",
+    ANGEL_ONE: "Angel One Web → Download Reports → Trades and Charges (.xlsx only — equity and F&O supported)",
     KOTAK: "Kotak Neo → Reports → Trade Report",
   };
   return hints[brokerCode] ?? "Your broker's tradebook / trade-history export";

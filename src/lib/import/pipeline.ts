@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db/prisma";
 import { getBrokerAdapter } from "@/lib/brokers/registry";
 import { downloadImportFile } from "@/lib/storage/s3";
 import { persistExecutionIfNew, regenerateTradesForInstruments } from "@/lib/import/execution-ingest";
+import { fingerprintForCanonicalRow } from "@/lib/import/dedup";
+import { createInstrumentResolutionCache } from "@/server/services/instrument.service";
 
 export interface ImportResult {
   totalRows: number;
@@ -64,6 +66,25 @@ export async function runImportPipeline(importJobId: string): Promise<ImportResu
 
   const touchedInstrumentIds = new Set<string>();
 
+  // See persistExecutionIfNew's doc comment: without this, a real
+  // ~11,000-row tradebook makes tens of thousands of sequential DB round
+  // trips (one findUnique + exchange upsert + instrument upsert per row),
+  // which against a hosted Postgres took 2-3 minutes and looked hung.
+  const instrumentCache = createInstrumentResolutionCache();
+  const validRowFingerprints = parsedRows
+    .filter((row) => row.execution && adapter.validateRow(row.execution).valid)
+    .map((row) => fingerprintForCanonicalRow(job.brokerAccountId, row.execution!));
+  const knownDuplicateFingerprints = new Set(
+    validRowFingerprints.length > 0
+      ? (
+          await prisma.execution.findMany({
+            where: { fingerprint: { in: validRowFingerprints } },
+            select: { fingerprint: true },
+          })
+        ).map((e) => e.fingerprint)
+      : []
+  );
+
   for (const row of parsedRows) {
     if (!row.execution) {
       await prisma.importRow.create({
@@ -88,7 +109,10 @@ export async function runImportPipeline(importJobId: string): Promise<ImportResu
       continue;
     }
 
-    const result = await persistExecutionIfNew(job.brokerAccountId, row.execution);
+    const result = await persistExecutionIfNew(job.brokerAccountId, row.execution, {
+      knownDuplicateFingerprints,
+      instrumentCache,
+    });
 
     if (result.status === "DUPLICATE") {
       await prisma.importRow.create({

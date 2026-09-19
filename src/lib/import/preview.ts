@@ -39,70 +39,71 @@ export async function previewImport(
   if (!adapter) throw new Error(`No adapter implemented for broker "${brokerCode}"`);
 
   const parsedRows = adapter.parseFile(buffer, fileType);
+
+  // Fingerprint every structurally-valid row up front and check them all in
+  // one query. The previous per-row `findUnique` in this loop meant a real
+  // ~11,000-row F&O tradebook made ~11,000 sequential DB round trips —
+  // 100+ seconds against a hosted (non-local) Postgres, looking like the
+  // page had hung.
+  const fingerprintByRowNumber = new Map<number, string>();
+  for (const row of parsedRows) {
+    if (row.execution && adapter.validateRow(row.execution).valid) {
+      fingerprintByRowNumber.set(row.rowNumber, fingerprintForCanonicalRow(brokerAccountId, row.execution));
+    }
+  }
+  const allFingerprints = Array.from(fingerprintByRowNumber.values());
+  const existingFingerprints =
+    allFingerprints.length > 0
+      ? new Set(
+          (
+            await prisma.execution.findMany({
+              where: { fingerprint: { in: allFingerprints } },
+              select: { fingerprint: true },
+            })
+          ).map((e) => e.fingerprint)
+        )
+      : new Set<string>();
+
   const rows: ImportPreviewRow[] = [];
   let validCount = 0;
   let invalidCount = 0;
   let duplicateCount = 0;
 
+  const classify = (row: (typeof parsedRows)[number]): "VALID" | "INVALID" | "DUPLICATE" => {
+    if (!row.execution || !adapter.validateRow(row.execution).valid) return "INVALID";
+    const fingerprint = fingerprintByRowNumber.get(row.rowNumber)!;
+    return existingFingerprints.has(fingerprint) ? "DUPLICATE" : "VALID";
+  };
+
   for (const row of parsedRows.slice(0, PREVIEW_ROW_LIMIT)) {
-    if (!row.execution) {
+    const status = classify(row);
+    if (status === "INVALID") {
       invalidCount++;
+      const validation = row.execution ? adapter.validateRow(row.execution) : null;
       rows.push({
         rowNumber: row.rowNumber,
-        symbol: row.raw.symbol ?? null,
-        side: null,
-        quantity: null,
-        price: null,
-        executedAt: null,
+        symbol: row.execution?.symbol ?? row.raw.symbol ?? null,
+        side: row.execution?.side ?? null,
+        quantity: row.execution?.quantity ?? null,
+        price: row.execution?.price ?? null,
+        executedAt: row.execution?.executedAt.toISOString() ?? null,
         status: "INVALID",
-        errors: row.errors,
+        errors: validation?.errors ?? row.errors,
       });
       continue;
     }
 
-    const validation = adapter.validateRow(row.execution);
-    if (!validation.valid) {
-      invalidCount++;
-      rows.push({
-        rowNumber: row.rowNumber,
-        symbol: row.execution.symbol,
-        side: row.execution.side,
-        quantity: row.execution.quantity,
-        price: row.execution.price,
-        executedAt: row.execution.executedAt.toISOString(),
-        status: "INVALID",
-        errors: validation.errors,
-      });
-      continue;
-    }
+    if (status === "DUPLICATE") duplicateCount++;
+    else validCount++;
 
-    const fingerprint = fingerprintForCanonicalRow(brokerAccountId, row.execution);
-    const existing = await prisma.execution.findUnique({ where: { fingerprint } });
-
-    if (existing) {
-      duplicateCount++;
-      rows.push({
-        rowNumber: row.rowNumber,
-        symbol: row.execution.symbol,
-        side: row.execution.side,
-        quantity: row.execution.quantity,
-        price: row.execution.price,
-        executedAt: row.execution.executedAt.toISOString(),
-        status: "DUPLICATE",
-        errors: [],
-      });
-      continue;
-    }
-
-    validCount++;
     rows.push({
       rowNumber: row.rowNumber,
-      symbol: row.execution.symbol,
-      side: row.execution.side,
-      quantity: row.execution.quantity,
-      price: row.execution.price,
-      executedAt: row.execution.executedAt.toISOString(),
-      status: "VALID",
+      symbol: row.execution!.symbol,
+      side: row.execution!.side,
+      quantity: row.execution!.quantity,
+      price: row.execution!.price,
+      executedAt: row.execution!.executedAt.toISOString(),
+      status,
       errors: [],
     });
   }
@@ -110,14 +111,10 @@ export async function previewImport(
   // Rows beyond PREVIEW_ROW_LIMIT still count toward totals so the summary
   // is accurate even though we don't render every row.
   for (const row of parsedRows.slice(PREVIEW_ROW_LIMIT)) {
-    if (!row.execution || !adapter.validateRow(row.execution).valid) {
-      invalidCount++;
-    } else {
-      const fingerprint = fingerprintForCanonicalRow(brokerAccountId, row.execution);
-      const existing = await prisma.execution.findUnique({ where: { fingerprint } });
-      if (existing) duplicateCount++;
-      else validCount++;
-    }
+    const status = classify(row);
+    if (status === "INVALID") invalidCount++;
+    else if (status === "DUPLICATE") duplicateCount++;
+    else validCount++;
   }
 
   return {

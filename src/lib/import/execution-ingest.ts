@@ -9,7 +9,7 @@ import { calculateRegulatoryCharges } from "@/lib/calculations/charges/regulator
 import { getBrokerageFormula } from "@/lib/calculations/charges/brokerage-formulas";
 import { aggregateOrders, attributeLegBrokerage } from "@/lib/calculations/charges/order-brokerage";
 import type { ChargeSegment } from "@/lib/calculations/charges/types";
-import { resolveInstrument } from "@/server/services/instrument.service";
+import { resolveInstrument, type InstrumentResolutionCache } from "@/server/services/instrument.service";
 import { evaluateAndScoreTrade } from "@/server/services/trade-scoring.service";
 
 export interface PersistExecutionResult {
@@ -25,25 +25,42 @@ export interface PersistExecutionResult {
  * a new Execution if it's genuinely new. Never silently drops a duplicate —
  * callers decide what to do with the DUPLICATE status (CSV import records it
  * on the ImportRow; live sync just skips it since there's no row to annotate).
+ *
+ * Bulk callers (the CSV pipeline) pass `knownDuplicateFingerprints` (from one
+ * batched query up front) and `instrumentCache` so a real ~11,000-row
+ * tradebook doesn't make ~11,000 sequential `findUnique` + upsert round
+ * trips. The live-sync path omits both — its volumes are small enough that
+ * the per-row DB check is fine.
  */
 export async function persistExecutionIfNew(
   brokerAccountId: string,
-  row: CanonicalExecutionRow
+  row: CanonicalExecutionRow,
+  options?: { knownDuplicateFingerprints?: Set<string>; instrumentCache?: InstrumentResolutionCache }
 ): Promise<PersistExecutionResult> {
   const fingerprint = fingerprintForCanonicalRow(brokerAccountId, row);
-  const existing = await prisma.execution.findUnique({ where: { fingerprint } });
-  if (existing) {
-    return { status: "DUPLICATE", fingerprint };
+
+  if (options?.knownDuplicateFingerprints) {
+    if (options.knownDuplicateFingerprints.has(fingerprint)) {
+      return { status: "DUPLICATE", fingerprint };
+    }
+  } else {
+    const existing = await prisma.execution.findUnique({ where: { fingerprint } });
+    if (existing) {
+      return { status: "DUPLICATE", fingerprint };
+    }
   }
 
-  const instrument = await resolveInstrument({
-    exchangeCode: row.exchange,
-    symbol: row.symbol,
-    isin: row.isin,
-    rawSegment: row.segment,
-    series: row.series,
-    derivative: row.derivative,
-  });
+  const instrument = await resolveInstrument(
+    {
+      exchangeCode: row.exchange,
+      symbol: row.symbol,
+      isin: row.isin,
+      rawSegment: row.segment,
+      series: row.series,
+      derivative: row.derivative,
+    },
+    options?.instrumentCache
+  );
 
   const execution = await prisma.execution.create({
     data: {

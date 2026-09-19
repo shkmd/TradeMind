@@ -1,6 +1,21 @@
 import { prisma } from "@/lib/db/prisma";
-import type { InstrumentSegment, OptionType } from "@prisma/client";
+import type { Exchange, Instrument, InstrumentSegment, OptionType } from "@prisma/client";
 import type { DerivativeContract } from "@/lib/brokers/adapter";
+
+/**
+ * Reused across a whole import run so the same handful of exchanges and
+ * instruments (e.g. ~200 distinct F&O contracts across an ~11,000-row
+ * tradebook) are upserted once instead of once per row — see the
+ * resolveInstrument doc comment.
+ */
+export interface InstrumentResolutionCache {
+  exchanges: Map<string, Exchange>;
+  instruments: Map<string, Instrument>;
+}
+
+export function createInstrumentResolutionCache(): InstrumentResolutionCache {
+  return { exchanges: new Map(), instruments: new Map() };
+}
 
 const SEGMENT_MAP: Record<string, InstrumentSegment> = {
   EQ: "EQUITY",
@@ -68,26 +83,41 @@ export function buildDerivativeInstrumentFields(derivative: DerivativeContract):
  * row. Keyed on (exchange, symbol, segment) per the schema's unique
  * constraint; ISIN is stored but not yet used as the join key here (full
  * cross-broker ISIN consolidation is a later-phase feature).
+ *
+ * `cache` is optional (omitted by the live-sync path, which handles small
+ * volumes) — when a bulk-import caller passes one, repeat rows for the same
+ * instrument skip the DB round trip entirely after the first occurrence.
  */
-export async function resolveInstrument(input: {
-  exchangeCode: string;
-  symbol: string;
-  isin: string | null;
-  rawSegment: string;
-  series: string | null;
-  derivative?: DerivativeContract | null;
-}) {
-  const exchange = await prisma.exchange.upsert({
-    where: { code: input.exchangeCode },
-    update: {},
-    create: { code: input.exchangeCode, name: input.exchangeCode },
-  });
+export async function resolveInstrument(
+  input: {
+    exchangeCode: string;
+    symbol: string;
+    isin: string | null;
+    rawSegment: string;
+    series: string | null;
+    derivative?: DerivativeContract | null;
+  },
+  cache?: InstrumentResolutionCache
+) {
+  let exchange = cache?.exchanges.get(input.exchangeCode);
+  if (!exchange) {
+    exchange = await prisma.exchange.upsert({
+      where: { code: input.exchangeCode },
+      update: {},
+      create: { code: input.exchangeCode, name: input.exchangeCode },
+    });
+    cache?.exchanges.set(input.exchangeCode, exchange);
+  }
 
   const derivativeFields = input.derivative ? buildDerivativeInstrumentFields(input.derivative) : null;
   const segment = derivativeFields?.segment ?? mapSegment(input.rawSegment);
   const symbol = derivativeFields?.symbol ?? input.symbol;
 
-  return prisma.instrument.upsert({
+  const instrumentKey = `${exchange.id}|${symbol}|${segment}`;
+  const cached = cache?.instruments.get(instrumentKey);
+  if (cached) return cached;
+
+  const instrument = await prisma.instrument.upsert({
     where: {
       exchangeId_symbol_segment: {
         exchangeId: exchange.id,
@@ -109,4 +139,6 @@ export async function resolveInstrument(input: {
       optionType: derivativeFields?.optionType,
     },
   });
+  cache?.instruments.set(instrumentKey, instrument);
+  return instrument;
 }
