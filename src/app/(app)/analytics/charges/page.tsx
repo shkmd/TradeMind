@@ -22,8 +22,8 @@ export default async function ChargesAnalysisPage() {
     );
   }
 
-  const grossPnl = trades.reduce((sum, t) => sum + Number(t.grossPnl ?? 0), 0);
-  const totalCharges = trades.reduce((sum, t) => sum + Number(t.totalCharges ?? 0), 0);
+  const grossPnl = trades.reduce((sum: number, t) => sum + Number(t.grossPnl ?? 0), 0);
+  const totalCharges = trades.reduce((sum: number, t) => sum + Number(t.totalCharges ?? 0), 0);
   const chargesPctOfGross = grossPnl !== 0 ? (totalCharges / Math.abs(grossPnl)) * 100 : null;
 
   const byBroker = new Map<string, number>();
