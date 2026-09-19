@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { getApiConnector, getDirectLoginConnector } from "@/lib/brokers/api-connector-registry";
-import { findEquityInstrumentByFuzzyName } from "@/server/services/instrument.service";
+import { matchEquityInstrumentByName } from "@/server/services/instrument.service";
 import { encryptToken, decryptToken } from "@/lib/crypto/token-encryption";
 import { persistExecutionIfNew, regenerateTradesForInstruments } from "@/lib/import/execution-ingest";
 import type { CanonicalExecutionRow } from "@/lib/brokers/adapter";
@@ -304,6 +304,20 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   // find-then-write rather than Prisma upsert, matching the
   // "illustrative, not fully wired" scope of the Holdings page. Live sync
   // intentionally keeps this simple.
+  // Fetched once and reused for every holding's fuzzy-match fallback below
+  // (was previously one query per holding). Also temporarily logged in
+  // full — need to see whether the expected CSV-imported instruments
+  // (WIPRO, IDFCFIRSTB, ...) are even in this account-scoped pool at all,
+  // since several that should match per matchEquityInstrumentByName's own
+  // test coverage aren't.
+  const equityCandidates = await prisma.instrument.findMany({
+    where: { segment: "EQUITY", executions: { some: { brokerAccountId } } },
+  });
+  console.warn(
+    `[broker-connect] ${equityCandidates.length} known equity instruments for account ${brokerAccountId}:`,
+    equityCandidates.map((c) => c.symbol)
+  );
+
   let holdingsSynced = 0;
   const unmatchedHoldings: { symbol: string; exchange: string }[] = [];
   for (const holding of holdings) {
@@ -311,9 +325,9 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       where: { symbol: holding.symbol, exchange: { code: holding.exchange } },
     });
     // Exact match fails for Angel One specifically (see
-    // findEquityInstrumentByFuzzyName's doc comment) — try the bounded,
+    // matchEquityInstrumentByName's doc comment) — try the bounded,
     // never-guess fallback before giving up on this holding.
-    if (!instrument) instrument = await findEquityInstrumentByFuzzyName(brokerAccountId, holding.symbol);
+    if (!instrument) instrument = matchEquityInstrumentByName(equityCandidates, holding.symbol);
     if (!instrument) {
       unmatchedHoldings.push({ symbol: holding.symbol, exchange: holding.exchange });
       continue; // resolved next sync once an execution creates it

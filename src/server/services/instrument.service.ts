@@ -179,13 +179,3 @@ export function matchEquityInstrumentByName<T extends { symbol: string }>(
   });
   return matches.length === 1 ? matches[0]! : null;
 }
-
-export async function findEquityInstrumentByFuzzyName(
-  brokerAccountId: string,
-  liveSymbol: string
-): Promise<Instrument | null> {
-  const candidates = await prisma.instrument.findMany({
-    where: { segment: "EQUITY", executions: { some: { brokerAccountId } } },
-  });
-  return matchEquityInstrumentByName(candidates, liveSymbol);
-}
