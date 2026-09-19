@@ -305,6 +305,7 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   // "illustrative, not fully wired" scope of the Holdings page. Live sync
   // intentionally keeps this simple.
   let holdingsSynced = 0;
+  const unmatchedHoldings: { symbol: string; exchange: string }[] = [];
   for (const holding of holdings) {
     let instrument = await prisma.instrument.findFirst({
       where: { symbol: holding.symbol, exchange: { code: holding.exchange } },
@@ -313,7 +314,10 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
     // findEquityInstrumentByFuzzyName's doc comment) — try the bounded,
     // never-guess fallback before giving up on this holding.
     if (!instrument) instrument = await findEquityInstrumentByFuzzyName(brokerAccountId, holding.symbol);
-    if (!instrument) continue; // resolved next sync once an execution creates it
+    if (!instrument) {
+      unmatchedHoldings.push({ symbol: holding.symbol, exchange: holding.exchange });
+      continue; // resolved next sync once an execution creates it
+    }
 
     const existingHolding = await prisma.holding.findFirst({ where: { brokerAccountId, instrumentId: instrument.id } });
     if (existingHolding) {
@@ -334,6 +338,19 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       });
     }
     holdingsSynced++;
+  }
+
+  if (unmatchedHoldings.length > 0) {
+    // Temporary diagnostic: the live API returned more holdings than we
+    // could attach to an existing instrument, even after the fuzzy-name
+    // fallback. Logging exactly which ones, so a real mismatch pattern
+    // (wrong exchange code, a symbol shape the matcher doesn't handle, an
+    // instrument that was never CSV-imported at all) can be diagnosed from
+    // Railway logs instead of guessed at.
+    console.warn(
+      `[broker-connect] ${unmatchedHoldings.length}/${holdings.length} live holdings for account ${brokerAccountId} had no matching instrument:`,
+      unmatchedHoldings
+    );
   }
 
   await prisma.importJob.update({
