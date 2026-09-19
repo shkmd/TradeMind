@@ -17,6 +17,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:reference": "tsx prisma/seed-reference-data.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },
