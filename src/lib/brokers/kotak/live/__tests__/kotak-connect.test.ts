@@ -1,29 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { kotakConnector } from "../kotak-connect";
 
-const ORIGINAL_ENV = { ...process.env };
-
-beforeEach(() => {
-  process.env.KOTAK_CONSUMER_KEY = "test_consumer_key";
-});
-
 afterEach(() => {
-  process.env = { ...ORIGINAL_ENV };
   vi.unstubAllGlobals();
 });
 
 describe("kotakConnector.isConfigured", () => {
-  it("is true when KOTAK_CONSUMER_KEY is set", () => {
+  it("is always true — the consumer key is per-user now, not a server env var", () => {
     expect(kotakConnector.isConfigured()).toBe(true);
-  });
-  it("is false when missing", () => {
-    delete process.env.KOTAK_CONSUMER_KEY;
-    expect(kotakConnector.isConfigured()).toBe(false);
   });
 });
 
 describe("kotakConnector.login", () => {
-  it("performs both totp_login then totp_validate in sequence, with the right headers each step", async () => {
+  it("performs both totp_login then totp_validate in sequence, with the given apiKey as Authorization each step", async () => {
     const calls: { url: string; headers: Record<string, string>; body: unknown }[] = [];
     vi.stubGlobal(
       "fetch",
@@ -41,7 +30,13 @@ describe("kotakConnector.login", () => {
       })
     );
 
-    const result = await kotakConnector.login({ mobileNumber: "+919999999999", ucc: "UCC1", totp: "111111", mpin: "9999" });
+    const result = await kotakConnector.login({
+      mobileNumber: "+919999999999",
+      ucc: "UCC1",
+      totp: "111111",
+      mpin: "9999",
+      apiKey: "test_consumer_key",
+    });
 
     expect(calls).toHaveLength(2);
     // Step 1: totp_login — Authorization is the raw consumer key, no sid/Auth yet.
@@ -58,12 +53,17 @@ describe("kotakConnector.login", () => {
     expect(result.accessToken).toBe("edit-token");
     expect(result.session?.sid).toBe("edit-sid");
     expect(result.session?.baseUrl).toBe("https://custom.kotaksecurities.com");
+    // The apiKey travels forward in `session` so later syncs can reuse it.
+    expect(result.session?.apiKey).toBe("test_consumer_key");
     // The MPIN itself must never appear anywhere in the returned token object.
     expect(JSON.stringify(result)).not.toContain("9999");
   });
 
-  it("throws when any required credential is missing", async () => {
+  it("throws when any required credential (including apiKey) is missing", async () => {
     await expect(kotakConnector.login({ mobileNumber: "+91999" })).rejects.toThrow(/required/i);
+    await expect(
+      kotakConnector.login({ mobileNumber: "+919999999999", ucc: "UCC1", totp: "111111", mpin: "9999" })
+    ).rejects.toThrow(/required/i);
   });
 });
 
@@ -109,5 +109,9 @@ describe("kotakConnector.fetchTodaysTrades", () => {
     expect(trades[0]!.segment).toBe("EQ");
     expect(trades[0]!.side).toBe("BUY");
     expect(trades[0]!.executedAt.toISOString()).toBe(new Date("2025-01-22T14:28:16+05:30").toISOString());
+  });
+
+  it("throws a clear error when the session is missing its sid", async () => {
+    await expect(kotakConnector.fetchTodaysTrades("edit-token", {})).rejects.toThrow(/incomplete/i);
   });
 });

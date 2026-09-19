@@ -164,6 +164,12 @@ export async function directLoginAndConnect(
     accessTokenEncrypted: encryptToken(exchanged.accessToken),
     refreshTokenEncrypted: encryptToken(JSON.stringify(exchanged.session ?? {})),
     tokenExpiresAt: exchanged.expiresAt,
+    // Angel One/Kotak: each user's own API key, submitted in this same form
+    // (see live-connect-card.tsx) — stored in its own field, separately
+    // from the general session blob above, since unlike a session it's a
+    // long-lived credential the user provided rather than something the
+    // broker issued us.
+    ...(credentials.apiKey ? { apiKeyEncrypted: encryptToken(credentials.apiKey) } : {}),
   };
   const connection = existing
     ? await prisma.brokerConnection.update({ where: { id: existing.id }, data })
@@ -229,9 +235,15 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       resolved.connector.fetchHoldings(accessToken),
     ]);
   } else {
+    // Angel One/Kotak: fold the user's own encrypted API key back into the
+    // session bag passed to the connector, so a later sync doesn't need to
+    // ask them to re-enter it — only login() (the form submission itself)
+    // gets it directly from `credentials`.
+    const apiKey = connection.apiKeyEncrypted ? decryptToken(connection.apiKeyEncrypted) : undefined;
+    const sessionWithApiKey = apiKey ? { ...(session ?? {}), apiKey } : session;
     [trades, holdings] = await Promise.all([
-      resolved.connector.fetchTodaysTrades(accessToken, session),
-      resolved.connector.fetchHoldings(accessToken, session),
+      resolved.connector.fetchTodaysTrades(accessToken, sessionWithApiKey),
+      resolved.connector.fetchHoldings(accessToken, sessionWithApiKey),
     ]);
   }
 

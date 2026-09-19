@@ -49,9 +49,14 @@ enum BrokerConnectionType {
   MANUAL
 }
 
-/// Read-only broker connections only. No password/PIN/TOTP is ever stored here —
-/// accessTokenEncrypted/refreshTokenEncrypted are reserved for a future official
-/// OAuth broker integration and remain null for CSV-based accounts.
+/// Read-only broker connections only. No password/PIN/TOTP/MPIN is ever stored
+/// here — accessTokenEncrypted/refreshTokenEncrypted/apiKeyEncrypted remain
+/// null for CSV-based accounts. apiKeyEncrypted is only set for brokers with
+/// no OAuth redirect (Angel One SmartAPI, Kotak Neo Trade API), where each
+/// end-user brings their own personal developer API key generated from that
+/// broker's own portal — distinct from Zerodha/Dhan/Upstox, whose API key +
+/// secret belong to this app's own registered developer app and stay as
+/// server-side env vars (see .env.example), not a per-connection value here.
 model BrokerConnection {
   id                    String                @id @default(cuid())
   brokerAccountId       String
@@ -59,6 +64,7 @@ model BrokerConnection {
   status                String                @default("ACTIVE")
   accessTokenEncrypted  String?
   refreshTokenEncrypted String?
+  apiKeyEncrypted       String?
   tokenExpiresAt        DateTime?
   lastSyncedAt          DateTime?
   createdAt             DateTime              @default(now())

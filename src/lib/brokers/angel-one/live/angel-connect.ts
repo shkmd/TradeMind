@@ -13,15 +13,21 @@ import type { CanonicalExecutionRow } from "../../adapter";
  * directly. This connector never stores that password/TOTP: `login()`
  * forwards it to Angel One's API in one call and returns only the
  * resulting JWT, which is what gets encrypted and persisted.
+ *
+ * SmartAPI also has no platform-level developer app the way Zerodha/Dhan/
+ * Upstox do — each Angel One account holder generates their own personal
+ * API key from smartapi.angelone.in. So the key travels with the request
+ * (from the login form, then from the encrypted per-connection session on
+ * later syncs) rather than living in a server-wide env var.
  */
 const ANGEL_ROOT = "https://apiconnect.angelone.in";
 
 async function angelRequest<T>(
   path: string,
-  options: { method?: "GET" | "POST"; accessToken?: string; body?: Record<string, unknown> } = {}
+  options: { method?: "GET" | "POST"; apiKey: string; accessToken?: string; body?: Record<string, unknown> }
 ): Promise<T> {
-  const apiKey = process.env.ANGEL_ONE_API_KEY;
-  if (!apiKey) throw new Error("ANGEL_ONE_API_KEY is not configured.");
+  const { apiKey } = options;
+  if (!apiKey) throw new Error("This Angel One connection is missing its API key.");
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -84,19 +90,24 @@ function todayIsoDate(): string {
 export const angelOneConnector: BrokerDirectLoginConnector = {
   brokerCode: "ANGEL_ONE",
 
+  // "Configured" is now a per-connection question (does this user's stored
+  // connection have its own API key?), not a server-wide one — always show
+  // the connect form and let login()/fetchTodaysTrades()/fetchHoldings()
+  // raise a specific error if a key is actually missing.
   isConfigured(): boolean {
-    return Boolean(process.env.ANGEL_ONE_API_KEY);
+    return true;
   },
 
-  /** credentials: { clientCode, password, totp } — used once, never stored. */
+  /** credentials: { clientCode, password, totp, apiKey } — used once, never stored raw. */
   async login(credentials: Record<string, string>): Promise<ExchangedToken> {
-    const { clientCode, password, totp } = credentials;
-    if (!clientCode || !password || !totp) {
-      throw new Error("Client code, password and TOTP are all required.");
+    const { clientCode, password, totp, apiKey } = credentials;
+    if (!clientCode || !password || !totp || !apiKey) {
+      throw new Error("Client code, password, TOTP and API key are all required.");
     }
 
     const data = await angelRequest<AngelLoginResponse>("/rest/auth/angelbroking/user/v1/loginByPassword", {
       method: "POST",
+      apiKey,
       body: { clientcode: clientCode, password, totp },
     });
 
@@ -110,12 +121,17 @@ export const angelOneConnector: BrokerDirectLoginConnector = {
       accessToken: data.jwtToken,
       expiresAt,
       brokerUserId: clientCode,
-      session: { refreshToken: data.refreshToken },
+      // apiKey travels in `session` (encrypted alongside refreshToken) so
+      // later syncs can reuse it without asking the user to re-enter it.
+      session: { refreshToken: data.refreshToken, apiKey },
     };
   },
 
-  async fetchTodaysTrades(accessToken: string): Promise<CanonicalExecutionRow[]> {
+  async fetchTodaysTrades(accessToken: string, session?: Record<string, string>): Promise<CanonicalExecutionRow[]> {
+    const apiKey = session?.apiKey;
+    if (!apiKey) throw new Error("This Angel One connection is missing its API key — reconnect it.");
     const trades = await angelRequest<AngelTradeRecord[]>("/rest/secure/angelbroking/order/v1/getTradeBook", {
+      apiKey,
       accessToken,
     });
     const today = todayIsoDate();
@@ -154,8 +170,11 @@ export const angelOneConnector: BrokerDirectLoginConnector = {
       }));
   },
 
-  async fetchHoldings(accessToken: string): Promise<CanonicalHoldingRow[]> {
+  async fetchHoldings(accessToken: string, session?: Record<string, string>): Promise<CanonicalHoldingRow[]> {
+    const apiKey = session?.apiKey;
+    if (!apiKey) throw new Error("This Angel One connection is missing its API key — reconnect it.");
     const holdings = await angelRequest<AngelHoldingRecord[]>("/rest/secure/angelbroking/portfolio/v1/getHolding", {
+      apiKey,
       accessToken,
     });
     return (holdings ?? []).map((h) => ({

@@ -127,15 +127,32 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
           {brokerCode === "ANGEL_ONE" ? "Angel One" : "Kotak Neo"} has no broker-hosted login page for its
           trading API — your {brokerCode === "ANGEL_ONE" ? "password and TOTP" : "TOTP and MPIN"} are sent
           directly to {brokerCode === "ANGEL_ONE" ? "Angel One's" : "Kotak's"} own servers to create a
-          session, and are never stored here. Used once per connection, then discarded.
+          session, and are never stored here. Used once per connection, then discarded. Your API key is
+          stored, but encrypted — never in plain text.
         </p>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        {brokerCode === "ANGEL_ONE" ? (
+          <>
+            Don&apos;t have an API key yet? Generate one free at{" "}
+            <span className="font-medium text-foreground">smartapi.angelone.in</span> — it&apos;s personal to
+            your own Angel One account, not shared across users.
+          </>
+        ) : (
+          <>
+            Don&apos;t have an API key yet? Generate one free in the Kotak Neo app — More → Trade API →
+            Generate application — it&apos;s personal to your own Kotak account, not shared across users.
+          </>
+        )}
+      </p>
 
       <form action={formAction} className="space-y-3">
         <input type="hidden" name="brokerAccountId" value={brokerAccountId} />
 
         {brokerCode === "ANGEL_ONE" && (
           <>
+            <Field label="API Key" name="apiKey" />
             <Field label="Client code" name="clientCode" />
             <Field label="Password" name="password" type="password" />
             <Field label="TOTP (from authenticator app)" name="totp" />
@@ -144,6 +161,7 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
 
         {brokerCode === "KOTAK" && (
           <>
+            <Field label="API Key (consumer key)" name="apiKey" />
             <Field label="Mobile number" name="mobileNumber" placeholder="+919999999999" />
             <Field label="UCC (client code)" name="ucc" />
             <Field label="TOTP (from authenticator app)" name="totp" />

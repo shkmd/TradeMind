@@ -95,23 +95,27 @@ function parseKotakDateTime(flDt: string, flTm: string): Date {
 export const kotakConnector: BrokerDirectLoginConnector = {
   brokerCode: "KOTAK",
 
+  // "Configured" is now a per-connection question (does this user's stored
+  // connection have its own consumer key?), not a server-wide one — always
+  // show the connect form and let login() raise a specific error if a key
+  // is actually missing.
   isConfigured(): boolean {
-    return Boolean(process.env.KOTAK_CONSUMER_KEY);
+    return true;
   },
 
   /**
-   * credentials: { mobileNumber, ucc, totp, mpin } — all four collected in
-   * one form submission client-side (rather than the true 2-step API round
-   * trip) to avoid holding an intermediate Kotak session token in browser
-   * state; server-side this still makes both Kotak API calls in sequence.
+   * credentials: { mobileNumber, ucc, totp, mpin, apiKey } — all five
+   * collected in one form submission client-side (rather than the true
+   * 2-step API round trip) to avoid holding an intermediate Kotak session
+   * token in browser state; server-side this still makes both Kotak API
+   * calls in sequence. `apiKey` here is Kotak's "consumer key", generated
+   * per end-user from the Kotak Neo app (More -> Trade API -> Generate
+   * application) — not a platform-level credential.
    */
   async login(credentials: Record<string, string>): Promise<ExchangedToken> {
-    const consumerKey = process.env.KOTAK_CONSUMER_KEY;
-    if (!consumerKey) throw new Error("KOTAK_CONSUMER_KEY is not configured.");
-
-    const { mobileNumber, ucc, totp, mpin } = credentials;
-    if (!mobileNumber || !ucc || !totp || !mpin) {
-      throw new Error("Mobile number, UCC, TOTP and MPIN are all required.");
+    const { mobileNumber, ucc, totp, mpin, apiKey: consumerKey } = credentials;
+    if (!mobileNumber || !ucc || !totp || !mpin || !consumerKey) {
+      throw new Error("Mobile number, UCC, TOTP, MPIN and API key are all required.");
     }
 
     const loginResponse = await kotakRequest<KotakTotpLoginResponse>(
@@ -152,16 +156,20 @@ export const kotakConnector: BrokerDirectLoginConnector = {
       accessToken: editToken,
       expiresAt,
       brokerUserId: validateResponse.data?.ucc,
+      // apiKey (Kotak's consumer key) travels in `session` alongside sid/
+      // baseUrl so later syncs can reuse it without asking the user to
+      // re-enter it — though neither fetch call below actually needs it
+      // over the wire (Sid + Auth are sufficient), unlike login() above.
       session: {
         sid: editSid,
         baseUrl: validateResponse.data?.baseUrl || KOTAK_DEFAULT_BASE_URL,
+        apiKey: consumerKey,
       },
     };
   },
 
   async fetchTodaysTrades(accessToken: string, session?: Record<string, string>): Promise<CanonicalExecutionRow[]> {
-    const consumerKey = process.env.KOTAK_CONSUMER_KEY;
-    if (!consumerKey || !session?.sid) throw new Error("Kotak session is incomplete.");
+    if (!session?.sid) throw new Error("Kotak session is incomplete — reconnect this account.");
     const baseUrl = session.baseUrl || KOTAK_DEFAULT_BASE_URL;
 
     const response = await kotakRequest<{ data: KotakTradeRecord[] }>(baseUrl, "quick/user/trades", {
@@ -188,8 +196,7 @@ export const kotakConnector: BrokerDirectLoginConnector = {
   },
 
   async fetchHoldings(accessToken: string, session?: Record<string, string>): Promise<CanonicalHoldingRow[]> {
-    const consumerKey = process.env.KOTAK_CONSUMER_KEY;
-    if (!consumerKey || !session?.sid) throw new Error("Kotak session is incomplete.");
+    if (!session?.sid) throw new Error("Kotak session is incomplete — reconnect this account.");
     const baseUrl = session.baseUrl || KOTAK_DEFAULT_BASE_URL;
 
     const response = await kotakRequest<{ data: KotakHoldingRecord[] }>(baseUrl, "portfolio/v1/holdings", {
