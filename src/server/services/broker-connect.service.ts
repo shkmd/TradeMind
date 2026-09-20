@@ -305,13 +305,16 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   // "illustrative, not fully wired" scope of the Holdings page. Live sync
   // intentionally keeps this simple.
   // Fetched once and reused for every holding's fuzzy-match fallback below
-  // (was previously one query per holding). Also temporarily logged in
-  // full — need to see whether the expected CSV-imported instruments
-  // (WIPRO, IDFCFIRSTB, ...) are even in this account-scoped pool at all,
-  // since several that should match per matchEquityInstrumentByName's own
-  // test coverage aren't.
+  // (was previously one query per holding). Deliberately NOT scoped to this
+  // broker account's own executions — Instrument is global reference data
+  // (no userId/brokerAccountId column; see market.prisma), shared across
+  // every broker account and user. Scoping it earlier meant a broker
+  // account with no prior CSV-imported executions of its own (e.g. a
+  // freshly-connected Dhan account with no same-day trades) always saw an
+  // empty candidate pool and every holding silently failed to match, no
+  // matter how correct the fuzzy-name logic was.
   const equityCandidates = await prisma.instrument.findMany({
-    where: { segment: "EQUITY", executions: { some: { brokerAccountId } } },
+    where: { segment: "EQUITY" },
     include: { exchange: true },
   });
 
