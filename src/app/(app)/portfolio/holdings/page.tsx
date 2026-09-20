@@ -43,6 +43,7 @@ export default async function HoldingsPage() {
   const holdings: HoldingViewRow[] = [
     ...liveSyncedHoldings.map((h) => ({
       id: h.id,
+      instrumentId: h.instrumentId,
       symbol: h.instrument.symbol,
       isin: h.instrument.isin,
       brokerNickname: h.brokerAccount.nickname,
@@ -54,6 +55,7 @@ export default async function HoldingsPage() {
     })),
     ...openDeliveryTrades.map((t) => ({
       id: t.id,
+      instrumentId: t.instrumentId,
       symbol: t.instrument.symbol,
       isin: t.instrument.isin,
       brokerNickname: t.brokerAccount.nickname,

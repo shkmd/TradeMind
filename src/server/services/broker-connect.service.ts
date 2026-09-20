@@ -368,6 +368,18 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       });
     }
 
+    // resolveInstrument's create/upsert already backfills isin above when
+    // it creates a NEW instrument — but the exact-match and fuzzy-match
+    // paths just did a plain findFirst, so a matched instrument that was
+    // originally CSV-imported without one (Angel One's CSV export never
+    // includes it) would otherwise stay isin=null forever even once a live
+    // sync from any broker proves the real value. Only ISIN consolidation
+    // on the Holdings page depends on this; harmless no-op when it already
+    // matches or the live API didn't provide one.
+    if (holding.isin && instrument.isin !== holding.isin) {
+      instrument = await prisma.instrument.update({ where: { id: instrument.id }, data: { isin: holding.isin } });
+    }
+
     touchedHoldingInstrumentIds.add(instrument.id);
     const existingHolding = await prisma.holding.findFirst({ where: { brokerAccountId, instrumentId: instrument.id } });
     if (existingHolding) {

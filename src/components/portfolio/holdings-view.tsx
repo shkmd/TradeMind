@@ -10,6 +10,7 @@ import { formatINR, formatPercent } from "@/lib/utils";
 
 export interface HoldingViewRow {
   id: string;
+  instrumentId: string;
   symbol: string;
   isin: string | null;
   brokerNickname: string;

@@ -1,5 +1,6 @@
 export interface ConsolidatableHolding {
   id: string;
+  instrumentId: string;
   isin: string | null;
   quantity: number;
   avgCostPrice: number;
@@ -20,10 +21,16 @@ export interface HoldingGroup<T> {
  * Groups holdings by ISIN — the only reliable cross-broker identifier
  * available (different brokers spell the same real security's symbol
  * differently, e.g. Angel One's CSV "SUZLON ENERGY LIMITED" vs Dhan's bare
- * "SUZLON" ticker). A holding with no ISIN (Angel One's CSV export never
- * includes one; Kotak's live sync doesn't either) becomes its own singleton
- * group rather than being guess-merged by symbol — same "never guess"
- * discipline as matchEquityInstrumentByName in instrument.service.ts.
+ * "SUZLON" ticker). When ISIN is missing (Angel One's CSV export never
+ * includes one; Kotak's live sync doesn't either), falls back to grouping
+ * by instrumentId instead of leaving every leg standalone — two holdings
+ * that already resolved to the exact same Instrument row are not a guess,
+ * they're a match the app's own instrument-resolution logic already made
+ * (e.g. two broker accounts' live syncs both matching an existing
+ * CSV-imported instrument by fuzzy name). Only when both ISIN and
+ * instrumentId differ does a holding stay in its own group — never
+ * guess-merge on symbol text alone, same discipline as
+ * matchEquityInstrumentByName in instrument.service.ts.
  *
  * weightedAvgCost is Σ(qty×avgCost)/Σqty across the group's legs — the
  * correct way to combine cost basis, not a plain average of each leg's
@@ -35,7 +42,7 @@ export interface HoldingGroup<T> {
 export function consolidateByIsin<T extends ConsolidatableHolding>(rows: T[]): HoldingGroup<T>[] {
   const groups = new Map<string, T[]>();
   for (const row of rows) {
-    const key = row.isin && row.isin.trim() !== "" ? `isin:${row.isin}` : `standalone:${row.id}`;
+    const key = row.isin && row.isin.trim() !== "" ? `isin:${row.isin}` : `instrument:${row.instrumentId}`;
     const existing = groups.get(key);
     if (existing) existing.push(row);
     else groups.set(key, [row]);

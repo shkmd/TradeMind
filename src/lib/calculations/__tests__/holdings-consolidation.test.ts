@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import { consolidateByIsin, type ConsolidatableHolding } from "../holdings-consolidation";
 
 function holding(overrides: Partial<ConsolidatableHolding> & { id: string }): ConsolidatableHolding {
-  return { isin: null, quantity: 0, avgCostPrice: 0, currentPrice: null, ...overrides };
+  // instrumentId defaults to a unique value per holding (its own id) unless
+  // a test explicitly gives two legs the same one, to simulate them having
+  // already resolved to the same Instrument row.
+  return { isin: null, instrumentId: overrides.id, quantity: 0, avgCostPrice: 0, currentPrice: null, ...overrides };
 }
 
 describe("consolidateByIsin", () => {
@@ -45,13 +48,28 @@ describe("consolidateByIsin", () => {
     expect(group.unrealised).toBe(200); // 1200 - 1000, unpriced leg excluded from both sides
   });
 
-  it("never merges two different holdings that both lack an ISIN", () => {
+  it("never merges two different holdings that both lack an ISIN and resolved to different instruments", () => {
     const groups = consolidateByIsin([
       holding({ id: "a", isin: null, quantity: 10, avgCostPrice: 100 }),
       holding({ id: "b", isin: null, quantity: 5, avgCostPrice: 200 }),
     ]);
     expect(groups).toHaveLength(2);
     expect(groups.every((g) => g.legs.length === 1)).toBe(true);
+  });
+
+  it("falls back to grouping by instrumentId when ISIN is missing but both legs already resolved to the same Instrument row", () => {
+    // Real production case: Angel One's CSV never captures ISIN, so an
+    // Instrument row created from a CSV import stays isin=null forever —
+    // but a later live sync from a second broker can still match that same
+    // existing row via fuzzy-name matching. Two holdings pointing at the
+    // exact same instrumentId are an already-confirmed match, not a guess.
+    const groups = consolidateByIsin([
+      holding({ id: "a", instrumentId: "inst-1", isin: null, quantity: 80, avgCostPrice: 12.61, currentPrice: 13.18 }),
+      holding({ id: "b", instrumentId: "inst-1", isin: null, quantity: 94, avgCostPrice: 12.95, currentPrice: 13.18 }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.legs).toHaveLength(2);
+    expect(groups[0]!.totalQuantity).toBe(174);
   });
 
   it("groups real-ISIN legs together while leaving null-ISIN holdings standalone", () => {
