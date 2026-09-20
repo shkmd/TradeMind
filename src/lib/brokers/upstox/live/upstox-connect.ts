@@ -1,44 +1,36 @@
-import type { BrokerApiConnector, CanonicalHoldingRow, ExchangedToken } from "../../api-connector";
+import type { BrokerDirectLoginConnector, CanonicalHoldingRow, ExchangedToken } from "../../api-connector";
 import type { CanonicalExecutionRow } from "../../adapter";
 
 /**
- * Upstox live API v2. Endpoints, OAuth2 flow and header format verified
- * directly against the official upstox/upstox-nodejs SDK source
- * (github.com/upstox/upstox-nodejs — src/ApiClient.js for the base URL and
- * Authorization header, src/api/LoginApi.js's examples for the
- * authorization_code grant, src/api/PostTradeApi.js for the historical
- * trades endpoint). Standard OAuth2 authorization_code redirect — the user
- * authenticates on Upstox's own site, we only ever receive a one-time
- * code — no password touches this app. Free, self-service developer app
- * registration at account.upstox.com/developer/apps (no paid subscription,
- * unlike Kite Connect).
+ * Upstox live API v2. Endpoints/header format verified directly against the
+ * official upstox/upstox-nodejs SDK source (github.com/upstox/upstox-nodejs
+ * — src/ApiClient.js for the base URL and Authorization header,
+ * src/api/PostTradeApi.js for the historical trades endpoint).
+ *
+ * Upstox's own docs (upstox.com/developer/api-documentation/authentication)
+ * confirm a manual token path: any account holder can self-register a free
+ * developer app at account.upstox.com/developer/apps under their own login,
+ * then click "Generate" on that app to mint a personal access token
+ * directly — "ideal for one-time or occasional API usage" per Upstox's own
+ * docs — with no OAuth redirect dance and no password ever touching this
+ * app. Neither fetch call below sends a client_id/secret at all (only
+ * Authorization: Bearer <token>, confirmed against the SDK) — those are
+ * only needed for the OAuth authorization_code exchange step, which this
+ * connector doesn't do, so no platform-level app is needed here. Same
+ * "each user brings their own credential" model as Angel One/Kotak/Dhan.
  *
  * Notably better than Kite Connect for backfill: /v2/charges/historical-trades
  * accepts a date range, not just "today".
  */
 const UPSTOX_ROOT = "https://api.upstox.com";
-const UPSTOX_AUTHORIZE_URL = "https://api.upstox.com/v2/login/authorization/dialog";
-
-function getRedirectUrl(): string {
-  const base = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  return `${base}/api/broker-connect/upstox/callback`;
-}
 
 async function upstoxRequest<T>(
   path: string,
-  options: { method?: "GET" | "POST"; accessToken?: string; body?: Record<string, string> } = {}
+  options: { accessToken: string }
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (options.accessToken) headers.Authorization = `Bearer ${options.accessToken}`;
-
-  const url = `${UPSTOX_ROOT}${path}`;
-  let body: string | undefined;
-  if (options.method === "POST" && options.body) {
-    headers["Content-Type"] = "application/x-www-form-urlencoded";
-    body = new URLSearchParams(options.body).toString();
-  }
-
-  const response = await fetch(url, { method: options.method ?? "GET", headers, body });
+  const response = await fetch(`${UPSTOX_ROOT}${path}`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${options.accessToken}` },
+  });
   const json = await response.json();
   if (!response.ok || json.status === "error") {
     const message = json.errors?.[0]?.message ?? json.message ?? response.statusText;
@@ -47,16 +39,6 @@ async function upstoxRequest<T>(
   return (json.data ?? json) as T;
 }
 
-interface UpstoxTokenResponse {
-  access_token: string;
-  user_id: string;
-  user_name?: string;
-  // Upstox access tokens expire at end of trading day; the token response
-  // itself doesn't include an explicit expiry field in the verified SDK
-  // example, so this connector applies the same "expires at ~6am IST next
-  // day" convention used for Kite Connect (also a SEBI-driven daily-expiry
-  // regime for broker API tokens).
-}
 interface UpstoxTradeRecord {
   exchange: string;
   segment: string;
@@ -80,45 +62,40 @@ interface UpstoxHoldingRecord {
   exchange: string;
 }
 
-export const upstoxConnector: BrokerApiConnector = {
+export const upstoxConnector: BrokerDirectLoginConnector = {
   brokerCode: "UPSTOX",
 
+  // "Configured" is now a per-connection question (does this user's stored
+  // connection have its own access token?), not a server-wide one — always
+  // show the connect form and let a sync call raise a specific error if a
+  // token is actually missing or invalid.
   isConfigured(): boolean {
-    return Boolean(process.env.UPSTOX_CLIENT_ID && process.env.UPSTOX_CLIENT_SECRET);
+    return true;
   },
 
-  async buildLoginUrl(): Promise<string> {
-    const clientId = process.env.UPSTOX_CLIENT_ID;
-    if (!clientId) throw new Error("UPSTOX_CLIENT_ID is not configured.");
-    const params = new URLSearchParams({
-      response_type: "code",
-      client_id: clientId,
-      redirect_uri: getRedirectUrl(),
-    });
-    return `${UPSTOX_AUTHORIZE_URL}?${params.toString()}`;
-  },
+  /**
+   * credentials: { accessToken } — self-generated by the user from their
+   * own Upstox developer app (account.upstox.com/developer/apps -> the app
+   * -> Generate), used once, never re-derived. There's no login API call to
+   * make here (unlike Angel One/Kotak) since Upstox already handed the user
+   * a valid token directly — this just stores it; a bad/expired token
+   * surfaces on the very next sync call instead of a separate up-front
+   * validation request.
+   */
+  async login(credentials: Record<string, string>): Promise<ExchangedToken> {
+    const { accessToken } = credentials;
+    if (!accessToken) {
+      throw new Error("Access token is required.");
+    }
 
-  async exchangeRequestToken(code: string): Promise<ExchangedToken> {
-    const clientId = process.env.UPSTOX_CLIENT_ID;
-    const clientSecret = process.env.UPSTOX_CLIENT_SECRET;
-    if (!clientId || !clientSecret) throw new Error("Upstox is not configured.");
-
-    const data = await upstoxRequest<UpstoxTokenResponse>("/v2/login/authorization/token", {
-      method: "POST",
-      body: {
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: getRedirectUrl(),
-        grant_type: "authorization_code",
-      },
-    });
-
+    // Upstox access tokens expire at end of trading day (SEBI-driven daily
+    // expiry, same regime as Kite Connect/Angel One/Kotak) — same "expires
+    // at ~6am IST next day" convention used across every other connector.
     const expiresAt = new Date();
-    expiresAt.setUTCHours(24 + 0, 30, 0, 0); // ~6:00 IST next day
+    expiresAt.setUTCHours(24 + 0, 30, 0, 0);
     if (expiresAt.getTime() < Date.now()) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
 
-    return { accessToken: data.access_token, expiresAt, brokerUserId: data.user_id, brokerUserName: data.user_name };
+    return { accessToken, expiresAt };
   },
 
   async fetchTodaysTrades(accessToken: string): Promise<CanonicalExecutionRow[]> {

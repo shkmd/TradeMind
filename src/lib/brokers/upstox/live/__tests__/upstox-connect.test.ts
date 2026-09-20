@@ -1,60 +1,29 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { upstoxConnector } from "../upstox-connect";
 
-const ORIGINAL_ENV = { ...process.env };
-
-beforeEach(() => {
-  process.env.UPSTOX_CLIENT_ID = "test_client_id";
-  process.env.UPSTOX_CLIENT_SECRET = "test_client_secret";
-  process.env.NEXTAUTH_URL = "http://localhost:3000";
-});
-
 afterEach(() => {
-  process.env = { ...ORIGINAL_ENV };
   vi.unstubAllGlobals();
 });
 
 describe("upstoxConnector.isConfigured", () => {
-  it("is true when both client id/secret are set", () => {
+  it("is always true — the access token is per-user now, not a server env var", () => {
     expect(upstoxConnector.isConfigured()).toBe(true);
   });
-  it("is false when either is missing", () => {
-    delete process.env.UPSTOX_CLIENT_SECRET;
-    expect(upstoxConnector.isConfigured()).toBe(false);
-  });
 });
 
-describe("upstoxConnector.buildLoginUrl", () => {
-  it("builds the standard OAuth2 authorize URL with response_type=code", async () => {
-    const url = await upstoxConnector.buildLoginUrl("connection-id");
-    expect(url).toBe(
-      "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=test_client_id&redirect_uri=http%3A%2F%2Flocalhost%3A3000%2Fapi%2Fbroker-connect%2Fupstox%2Fcallback"
-    );
+describe("upstoxConnector.login", () => {
+  it("accepts a self-generated access token without any API call", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await upstoxConnector.login({ accessToken: "user-generated-token" });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.accessToken).toBe("user-generated-token");
   });
-});
 
-describe("upstoxConnector.exchangeRequestToken", () => {
-  it("posts the authorization_code grant with form-encoded body", async () => {
-    let capturedBody = "";
-    let capturedHeaders: Record<string, string> = {};
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init: { headers: Record<string, string>; body: string }) => {
-        capturedBody = init.body;
-        capturedHeaders = init.headers;
-        return { ok: true, json: async () => ({ status: "success", data: { access_token: "tok", user_id: "U1" } }) };
-      })
-    );
-
-    const result = await upstoxConnector.exchangeRequestToken("auth-code-123");
-    const params = new URLSearchParams(capturedBody);
-    expect(params.get("grant_type")).toBe("authorization_code");
-    expect(params.get("code")).toBe("auth-code-123");
-    expect(params.get("client_id")).toBe("test_client_id");
-    expect(params.get("client_secret")).toBe("test_client_secret");
-    expect(capturedHeaders["Content-Type"]).toBe("application/x-www-form-urlencoded");
-    expect(result.accessToken).toBe("tok");
-    expect(result.brokerUserId).toBe("U1");
+  it("throws when the access token is missing", async () => {
+    await expect(upstoxConnector.login({})).rejects.toThrow(/required/i);
   });
 });
 
@@ -94,5 +63,31 @@ describe("upstoxConnector.fetchTodaysTrades", () => {
     expect(capturedHeaders.Authorization).toBe("Bearer the-access-token");
     expect(capturedUrl).toContain("/v2/charges/historical-trades?");
     expect(trades[0]!.brokerOrderId).toBe("T1"); // falls back to trade_id
+  });
+});
+
+describe("upstoxConnector.fetchHoldings", () => {
+  it("sends a Bearer auth header and maps holdings", async () => {
+    let capturedUrl = "";
+    let capturedHeaders: Record<string, string> = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: { headers: Record<string, string> }) => {
+        capturedUrl = url;
+        capturedHeaders = init.headers;
+        return {
+          ok: true,
+          json: async () => [
+            { isin: "INE062A01020", quantity: 5, tradingsymbol: "SBIN", average_price: 500, last_price: 520, exchange: "NSE" },
+          ],
+        };
+      })
+    );
+
+    const holdings = await upstoxConnector.fetchHoldings("the-access-token");
+    expect(capturedHeaders.Authorization).toBe("Bearer the-access-token");
+    expect(capturedUrl).toContain("/v2/portfolio/long-term-holdings");
+    expect(holdings[0]!.symbol).toBe("SBIN");
+    expect(holdings[0]!.avgCostPrice).toBe(500);
   });
 });

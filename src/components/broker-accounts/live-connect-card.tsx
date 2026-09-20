@@ -124,11 +124,12 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
       <div className="flex items-start gap-2 rounded-md bg-warning-muted px-3 py-2 text-xs text-warning-foreground">
         <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <p>
-          {brokerCode === "DHAN" ? (
+          {brokerCode === "DHAN" || brokerCode === "UPSTOX" ? (
             <>
-              Dhan has no redirect login for this — you generate your own access token directly on Dhan&apos;s
-              site first, so no password ever passes through this app at all. The token itself is stored, but
-              encrypted — never in plain text.
+              {brokerCode === "DHAN" ? "Dhan" : "Upstox"} has no redirect login for this — you generate your own
+              access token directly on {brokerCode === "DHAN" ? "Dhan's" : "Upstox's"} site first, so no password
+              ever passes through this app at all. The token itself is stored, but encrypted — never in plain
+              text.
             </>
           ) : (
             <>
@@ -164,6 +165,14 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
             reconnect here once it expires.
           </>
         )}
+        {brokerCode === "UPSTOX" && (
+          <>
+            Don&apos;t have an access token yet? Create a free app at{" "}
+            <span className="font-medium text-foreground">account.upstox.com/developer/apps</span> (on your own
+            Upstox account), open it, and click &quot;Generate&quot; — valid until end of trading day, and
+            you&apos;ll need to regenerate and reconnect here each morning.
+          </>
+        )}
       </p>
 
       <form action={formAction} className="space-y-3">
@@ -194,6 +203,8 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
             <Field label="Dhan Client ID" name="dhanClientId" />
           </>
         )}
+
+        {brokerCode === "UPSTOX" && <Field label="Access token" name="accessToken" />}
 
         {state.status === "error" && <p className="text-sm font-medium text-destructive">{state.message}</p>}
         {state.status === "success" && (
