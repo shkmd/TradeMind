@@ -44,6 +44,7 @@ export default async function HoldingsPage() {
     ...liveSyncedHoldings.map((h) => ({
       id: h.id,
       symbol: h.instrument.symbol,
+      isin: h.instrument.isin,
       brokerNickname: h.brokerAccount.nickname,
       instrumentType: isLikelyETF(h.instrument.symbol) ? ("ETF" as const) : ("STOCK" as const),
       quantity: Number(h.quantity),
@@ -54,6 +55,7 @@ export default async function HoldingsPage() {
     ...openDeliveryTrades.map((t) => ({
       id: t.id,
       symbol: t.instrument.symbol,
+      isin: t.instrument.isin,
       brokerNickname: t.brokerAccount.nickname,
       instrumentType: isLikelyETF(t.instrument.symbol) ? ("ETF" as const) : ("STOCK" as const),
       quantity: t.quantity,
@@ -66,7 +68,7 @@ export default async function HoldingsPage() {
   return (
     <div>
       <PageHeader title="Consolidated Holdings" description="Holdings consolidated across all connected broker accounts." />
-      <PhaseNotice feature="Multi-broker ISIN consolidation and corporate-action adjustment" phase={3} />
+      <PhaseNotice feature="Corporate-action adjustment (stock splits, bonuses, mergers)" phase={3} />
 
       {holdings.length === 0 ? (
         <EmptyState icon={Wallet} title="No holdings yet" description="Delivery holdings will appear here once imported or entered manually." />

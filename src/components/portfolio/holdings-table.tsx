@@ -4,14 +4,16 @@ import { useState } from "react";
 import {
   type Column,
   type ColumnDef,
+  type ExpandedState,
   type SortingState,
   flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { TablePagination } from "@/components/shared/table-pagination";
@@ -28,13 +30,31 @@ export interface HoldingRow {
   value: number | null;
   unrealised: number | null;
   unrealisedPct: number | null;
+  // Present only on a group row consolidating the same real security (by
+  // ISIN) held across multiple broker accounts — see holdings-view.tsx.
+  subRows?: HoldingRow[];
 }
 
 const columns: ColumnDef<HoldingRow>[] = [
   {
     accessorKey: "symbol",
     header: ({ column }) => <SortButton column={column}>Instrument</SortButton>,
-    cell: ({ row }) => <span className="font-medium">{row.original.symbol}</span>,
+    cell: ({ row }) => (
+      <div className="flex items-center gap-1.5" style={{ paddingLeft: `${row.depth * 1.25}rem` }}>
+        {row.getCanExpand() ? (
+          <button
+            onClick={row.getToggleExpandedHandler()}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label={row.getIsExpanded() ? "Collapse" : "Expand"}
+          >
+            {row.getIsExpanded() ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </button>
+        ) : (
+          row.depth > 0 && <span className="inline-block w-3.5" />
+        )}
+        <span className="font-medium">{row.original.symbol}</span>
+      </div>
+    ),
   },
   {
     accessorKey: "brokerNickname",
@@ -95,15 +115,23 @@ function SortButton({ column, children }: { column: Column<HoldingRow, unknown>;
 
 export function HoldingsTable({ data }: { data: HoldingRow[] }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: "value", desc: true }]);
+  const [expanded, setExpanded] = useState<ExpandedState>({});
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting },
+    state: { sorting, expanded },
     onSortingChange: setSorting,
+    onExpandedChange: setExpanded,
+    getSubRows: (row) => row.subRows,
+    // Keep a group's broker-leg rows attached under their parent regardless
+    // of which page it falls on, rather than TanStack's default of counting
+    // expanded children toward the page size and splitting them off.
+    paginateExpandedRows: false,
     initialState: { pagination: { pageSize: 25 } },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
   });
 
@@ -124,7 +152,7 @@ export function HoldingsTable({ data }: { data: HoldingRow[] }) {
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
+              <TableRow key={row.id} className={row.depth > 0 ? "bg-surface-muted/50" : undefined}>
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id} className="whitespace-nowrap">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
