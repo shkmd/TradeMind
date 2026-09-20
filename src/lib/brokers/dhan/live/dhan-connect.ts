@@ -128,7 +128,14 @@ export const dhanConnector: BrokerDirectLoginConnector = {
     return holdings.map((h) => ({
       symbol: h.tradingSymbol,
       isin: h.isin ?? null,
-      exchange: h.exchange || "NSE",
+      // Verified against a real response: Dhan's holdings endpoint reports
+      // "ALL" as the literal exchange value (equity demat holdings settle
+      // across NSE/BSE together), not an actual exchange code — passing
+      // that straight through left every holding unmatched against our
+      // Exchange table, which only has real codes (NSE/BSE/MCX). NSE is the
+      // correct default for equity holdings, same assumption CSV import
+      // already makes when a row doesn't specify one.
+      exchange: h.exchange && h.exchange !== "ALL" ? h.exchange : "NSE",
       quantity: h.totalQty,
       avgCostPrice: h.avgCostPrice,
       lastPrice: h.lastTradedPrice ?? null,

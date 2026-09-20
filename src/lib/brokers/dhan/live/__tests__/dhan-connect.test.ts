@@ -91,4 +91,23 @@ describe("dhanConnector.fetchHoldings", () => {
     expect(holdings[0]!.symbol).toBe("WIPRO");
     expect(holdings[0]!.avgCostPrice).toBe(400);
   });
+
+  it("normalizes Dhan's literal \"ALL\" exchange value to NSE (the bug this fixes)", async () => {
+    // Real example: a live account with confirmed real holdings synced as
+    // "0 holdings" with no error, because Dhan's holdings endpoint reports
+    // exchange: "ALL" literally — not a real exchange code — which matched
+    // nothing in our Exchange table and silently failed every holding.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { tradingSymbol: "SJVN", exchange: "ALL", totalQty: 20, avgCostPrice: 73.59, lastTradedPrice: 63.95, isin: "INE002L01015" },
+        ],
+      }))
+    );
+
+    const holdings = await dhanConnector.fetchHoldings("the-access-token");
+    expect(holdings[0]!.exchange).toBe("NSE");
+  });
 });
