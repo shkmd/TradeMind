@@ -31,6 +31,11 @@ async function kotakRequest<T>(
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const json = await response.json();
+  // Temporary diagnostic: first-ever real login attempt returned a 424 with
+  // no further detail — need the exact raw body (never logs mobileNumber/
+  // totp/mpin themselves, only Kotak's own response) to tell a wrong base
+  // URL/path/header apart from a real account-side rejection.
+  console.warn(`[kotak-connect] ${path} -> status ${response.status}, ok=${response.ok}`, JSON.stringify(json).slice(0, 1000));
   if (!response.ok) {
     throw new Error(`Kotak Neo API error (${response.status}): ${json.errMsg ?? json.message ?? response.statusText}`);
   }
