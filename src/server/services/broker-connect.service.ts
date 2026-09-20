@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { getApiConnector, getDirectLoginConnector } from "@/lib/brokers/api-connector-registry";
-import { matchEquityInstrumentByName } from "@/server/services/instrument.service";
+import { matchEquityInstrumentByName, resolveInstrument } from "@/server/services/instrument.service";
 import { encryptToken, decryptToken } from "@/lib/crypto/token-encryption";
 import { persistExecutionIfNew, regenerateTradesForInstruments } from "@/lib/import/execution-ingest";
 import type { CanonicalExecutionRow } from "@/lib/brokers/adapter";
@@ -319,7 +319,6 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   });
 
   let holdingsSynced = 0;
-  const unmatchedHoldings: { symbol: string; exchange: string }[] = [];
   const ambiguousHoldings: { symbol: string; exchange: string; candidates: string[] }[] = [];
   const touchedHoldingInstrumentIds = new Set<string>();
   for (const holding of holdings) {
@@ -335,7 +334,6 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
     const sameExchangeCandidates = equityCandidates.filter((c) => c.exchange.code === holding.exchange);
     if (!instrument) instrument = matchEquityInstrumentByName(sameExchangeCandidates, holding.symbol);
     if (!instrument) {
-      unmatchedHoldings.push({ symbol: holding.symbol, exchange: holding.exchange });
       // A genuinely ambiguous case (2+ same-exchange candidates both prefix-
       // matching) is usually a real data problem — e.g. the same stock's
       // trade history fragmented across a truncated-symbol duplicate row
@@ -352,8 +350,22 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       });
       if (collided.length > 1) {
         ambiguousHoldings.push({ symbol: holding.symbol, exchange: holding.exchange, candidates: collided.map((c) => c.symbol) });
+        continue; // real data problem (e.g. a duplicate instrument row) — resolve deliberately, never guess between 2+ real candidates
       }
-      continue; // resolved next sync once an execution creates it
+      // Zero real candidates, not ambiguous: no CSV import has ever created
+      // an Instrument for this stock at all, on any account. The live
+      // holding's own symbol+exchange is authoritative data straight from
+      // the broker (not a guess), so create it fresh rather than skip the
+      // holding forever — this is the common case for an account connected
+      // live with no prior CSV import history (e.g. Dhan-only, never
+      // imported an Angel One-style CSV).
+      instrument = await resolveInstrument({
+        exchangeCode: holding.exchange,
+        symbol: holding.symbol,
+        isin: holding.isin,
+        rawSegment: "EQ",
+        series: null,
+      });
     }
 
     touchedHoldingInstrumentIds.add(instrument.id);
@@ -400,18 +412,6 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
     data: { deletedAt: new Date() },
   });
 
-  if (unmatchedHoldings.length > 0) {
-    // Temporary diagnostic: the live API returned more holdings than we
-    // could attach to an existing instrument, even after the fuzzy-name
-    // fallback. Logging exactly which ones, so a real mismatch pattern
-    // (wrong exchange code, a symbol shape the matcher doesn't handle, an
-    // instrument that was never CSV-imported at all) can be diagnosed from
-    // Railway logs instead of guessed at.
-    console.warn(
-      `[broker-connect] ${unmatchedHoldings.length}/${holdings.length} live holdings for account ${brokerAccountId} had no matching instrument:`,
-      unmatchedHoldings
-    );
-  }
   if (ambiguousHoldings.length > 0) {
     // These specifically collided between 2+ same-exchange candidates —
     // usually means that stock's trade history is already fragmented across
