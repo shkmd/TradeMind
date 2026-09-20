@@ -1,18 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type Column,
   type ColumnDef,
+  type ColumnFiltersState,
   type SortingState,
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TablePagination } from "@/components/shared/table-pagination";
 import { cn, formatINR, formatPercent } from "@/lib/utils";
 
@@ -20,6 +25,7 @@ export interface HoldingRow {
   id: string;
   symbol: string;
   brokerNickname: string;
+  instrumentType: "STOCK" | "ETF";
   quantity: number;
   avgCostPrice: number;
   currentPrice: number | null;
@@ -27,6 +33,9 @@ export interface HoldingRow {
   unrealised: number | null;
   unrealisedPct: number | null;
 }
+
+const ALL_BROKERS = "__all_brokers__";
+const ALL_TYPES = "__all_types__";
 
 const columns: ColumnDef<HoldingRow>[] = [
   {
@@ -38,6 +47,15 @@ const columns: ColumnDef<HoldingRow>[] = [
     accessorKey: "brokerNickname",
     header: ({ column }) => <SortButton column={column}>Broker</SortButton>,
     cell: ({ row }) => <span className="text-muted-foreground">{row.original.brokerNickname}</span>,
+    filterFn: "equals",
+  },
+  {
+    accessorKey: "instrumentType",
+    header: ({ column }) => <SortButton column={column}>Type</SortButton>,
+    cell: ({ row }) => (
+      <Badge variant="secondary">{row.original.instrumentType === "ETF" ? "ETF/Fund" : "Stock"}</Badge>
+    ),
+    filterFn: "equals",
   },
   {
     accessorKey: "quantity",
@@ -86,20 +104,65 @@ function SortButton({ column, children }: { column: Column<HoldingRow, unknown>;
 
 export function HoldingsTable({ data }: { data: HoldingRow[] }) {
   const [sorting, setSorting] = useState<SortingState>([{ id: "value", desc: true }]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [symbolFilter, setSymbolFilter] = useState("");
+
+  const brokers = useMemo(() => Array.from(new Set(data.map((h) => h.brokerNickname))).sort(), [data]);
 
   const table = useReactTable({
     data,
     columns,
-    state: { sorting },
+    state: { sorting, columnFilters, globalFilter: symbolFilter },
     onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onGlobalFilterChange: setSymbolFilter,
     initialState: { pagination: { pageSize: 25 } },
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    globalFilterFn: (row, _columnId, filterValue) => row.original.symbol.toLowerCase().includes(filterValue.toLowerCase()),
   });
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          placeholder="Filter by symbol..."
+          value={symbolFilter}
+          onChange={(e) => setSymbolFilter(e.target.value)}
+          className="max-w-xs"
+        />
+        <Select
+          value={(table.getColumn("brokerNickname")?.getFilterValue() as string) ?? ALL_BROKERS}
+          onValueChange={(value) => table.getColumn("brokerNickname")?.setFilterValue(value === ALL_BROKERS ? undefined : value)}
+        >
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="All brokers" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_BROKERS}>All brokers</SelectItem>
+            {brokers.map((broker) => (
+              <SelectItem key={broker} value={broker}>
+                {broker}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={(table.getColumn("instrumentType")?.getFilterValue() as string) ?? ALL_TYPES}
+          onValueChange={(value) => table.getColumn("instrumentType")?.setFilterValue(value === ALL_TYPES ? undefined : value)}
+        >
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="All types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TYPES}>All types</SelectItem>
+            <SelectItem value="STOCK">Stocks</SelectItem>
+            <SelectItem value="ETF">ETFs/Funds</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="overflow-x-auto rounded-lg border border-surface-border bg-surface">
         <Table>
           <TableHeader>
@@ -123,10 +186,17 @@ export function HoldingsTable({ data }: { data: HoldingRow[] }) {
                 ))}
               </TableRow>
             ))}
+            {table.getRowModel().rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="py-8 text-center text-sm text-muted-foreground">
+                  No holdings match your filters.
+                </TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </div>
-      <TablePagination table={table} totalRows={data.length} />
+      <TablePagination table={table} totalRows={table.getFilteredRowModel().rows.length} />
     </div>
   );
 }

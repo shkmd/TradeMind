@@ -6,6 +6,7 @@ import { PhaseNotice } from "@/components/shared/phase-notice";
 import { EmptyState } from "@/components/shared/empty-state";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { HoldingsTable } from "@/components/portfolio/holdings-table";
+import { isLikelyETF } from "@/lib/market-data/is-etf";
 import { formatINR, formatPercent } from "@/lib/utils";
 
 interface HoldingRow {
@@ -133,6 +134,7 @@ export default async function HoldingsPage() {
               id: h.id,
               symbol: h.symbol,
               brokerNickname: h.brokerNickname,
+              instrumentType: isLikelyETF(h.symbol) ? ("ETF" as const) : ("STOCK" as const),
               quantity: h.quantity,
               avgCostPrice: h.avgCostPrice,
               currentPrice: h.currentPrice,
