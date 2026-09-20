@@ -318,6 +318,7 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   let holdingsSynced = 0;
   const unmatchedHoldings: { symbol: string; exchange: string }[] = [];
   const ambiguousHoldings: { symbol: string; exchange: string; candidates: string[] }[] = [];
+  const touchedHoldingInstrumentIds = new Set<string>();
   for (const holding of holdings) {
     let instrument = await prisma.instrument.findFirst({
       where: { symbol: holding.symbol, exchange: { code: holding.exchange } },
@@ -352,6 +353,7 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       continue; // resolved next sync once an execution creates it
     }
 
+    touchedHoldingInstrumentIds.add(instrument.id);
     const existingHolding = await prisma.holding.findFirst({ where: { brokerAccountId, instrumentId: instrument.id } });
     if (existingHolding) {
       await prisma.holding.update({
@@ -361,6 +363,7 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
           avgCostPrice: holding.avgCostPrice,
           currentPrice: holding.lastPrice,
           previousClose: holding.previousClose,
+          deletedAt: null,
         },
       });
     } else {
@@ -378,6 +381,21 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
     }
     holdingsSynced++;
   }
+
+  // Treat this sync as the authoritative full snapshot of what's currently
+  // held: soft-delete any previously-synced Holding row for this account
+  // that wasn't touched just now. Without this, a holding matched to the
+  // wrong instrument by an earlier, buggier version of the matcher (or one
+  // genuinely sold since the last sync) stays behind forever as a stale
+  // duplicate row showing the same numbers as the correct one.
+  await prisma.holding.updateMany({
+    where: {
+      brokerAccountId,
+      deletedAt: null,
+      instrumentId: { notIn: Array.from(touchedHoldingInstrumentIds) },
+    },
+    data: { deletedAt: new Date() },
+  });
 
   if (unmatchedHoldings.length > 0) {
     // Temporary diagnostic: the live API returned more holdings than we
