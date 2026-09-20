@@ -175,7 +175,12 @@ export function matchEquityInstrumentByName<T extends { symbol: string }>(
   const normalizedLive = liveSymbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const matches = candidates.filter((c) => {
     const normalizedCsv = normalizeCompanyName(c.symbol);
-    return normalizedCsv.length > 0 && (normalizedCsv.startsWith(normalizedLive) || normalizedLive.startsWith(normalizedCsv));
+    if (normalizedCsv.length === 0) return false;
+    if (normalizedCsv.startsWith(normalizedLive) || normalizedLive.startsWith(normalizedCsv)) return true;
+    // Covers AMC-style fund names like "MIRAEAMC - METAL" or
+    // "TATAAML-TATAGOLD", where the live ticker appears as a suffix after
+    // the fund house's own prefix rather than at the start of the string.
+    return normalizedLive.length >= 4 && normalizedCsv.includes(normalizedLive);
   });
   return matches.length === 1 ? matches[0]! : null;
 }

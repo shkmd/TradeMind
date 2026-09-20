@@ -85,4 +85,22 @@ describe("matchEquityInstrumentByName", () => {
     // A naive "starts with TATA" match would hit both — must not pick either.
     expect(matchEquityInstrumentByName(ambiguous, "TATA")).toBeNull();
   });
+
+  it("matches an AMC-prefixed fund name where the live ticker is a suffix, not a prefix", () => {
+    // Real examples: Angel One's CSV names these funds "{AMC} - {ticker}" or
+    // "{AMC}-{ticker}", but the live ticker alone never prefixes the string.
+    const funds = [
+      { symbol: "MIRAEAMC - METAL" },
+      { symbol: "TATAAML-TATAGOLD" },
+      { symbol: "AONEAMC - AONENIFTY" },
+    ];
+    expect(matchEquityInstrumentByName(funds, "METAL")?.symbol).toBe("MIRAEAMC - METAL");
+    expect(matchEquityInstrumentByName(funds, "TATAGOLD")?.symbol).toBe("TATAAML-TATAGOLD");
+    expect(matchEquityInstrumentByName(funds, "AONENIFTY")?.symbol).toBe("AONEAMC - AONENIFTY");
+  });
+
+  it("does not use the substring rule for tickers shorter than 4 characters (too easy to false-match)", () => {
+    const candidates = [{ symbol: "SOME LONG COMPANY NAME" }];
+    expect(matchEquityInstrumentByName(candidates, "ONG")).toBeNull();
+  });
 });
