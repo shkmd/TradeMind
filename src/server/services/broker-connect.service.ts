@@ -312,24 +312,43 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
   // test coverage aren't.
   const equityCandidates = await prisma.instrument.findMany({
     where: { segment: "EQUITY", executions: { some: { brokerAccountId } } },
+    include: { exchange: true },
   });
-  console.warn(
-    `[broker-connect] ${equityCandidates.length} known equity instruments for account ${brokerAccountId}:`,
-    equityCandidates.map((c) => c.symbol)
-  );
 
   let holdingsSynced = 0;
   const unmatchedHoldings: { symbol: string; exchange: string }[] = [];
+  const ambiguousHoldings: { symbol: string; exchange: string; candidates: string[] }[] = [];
   for (const holding of holdings) {
     let instrument = await prisma.instrument.findFirst({
       where: { symbol: holding.symbol, exchange: { code: holding.exchange } },
     });
     // Exact match fails for Angel One specifically (see
     // matchEquityInstrumentByName's doc comment) — try the bounded,
-    // never-guess fallback before giving up on this holding.
-    if (!instrument) instrument = matchEquityInstrumentByName(equityCandidates, holding.symbol);
+    // never-guess fallback before giving up on this holding. Scoped to the
+    // same exchange as the live holding — the same company can legitimately
+    // have separate NSE and BSE instrument rows, which otherwise reads as a
+    // false ambiguous-match and gets skipped for no real reason.
+    const sameExchangeCandidates = equityCandidates.filter((c) => c.exchange.code === holding.exchange);
+    if (!instrument) instrument = matchEquityInstrumentByName(sameExchangeCandidates, holding.symbol);
     if (!instrument) {
       unmatchedHoldings.push({ symbol: holding.symbol, exchange: holding.exchange });
+      // A genuinely ambiguous case (2+ same-exchange candidates both prefix-
+      // matching) is usually a real data problem — e.g. the same stock's
+      // trade history fragmented across a truncated-symbol duplicate row
+      // from an earlier import — not two different real stocks. Surfacing
+      // which candidates collided, rather than just "unmatched", so it can
+      // be diagnosed instead of silently skipped forever.
+      const normalizedLive = holding.symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      const collided = sameExchangeCandidates.filter((c) => {
+        const normalizedCsv = c.symbol
+          .toUpperCase()
+          .replace(/\b(LIMITED|LTD\.?|PRIVATE|PVT\.?)\b/g, "")
+          .replace(/[^A-Z0-9]/g, "");
+        return normalizedCsv.length > 0 && (normalizedCsv.startsWith(normalizedLive) || normalizedLive.startsWith(normalizedCsv));
+      });
+      if (collided.length > 1) {
+        ambiguousHoldings.push({ symbol: holding.symbol, exchange: holding.exchange, candidates: collided.map((c) => c.symbol) });
+      }
       continue; // resolved next sync once an execution creates it
     }
 
@@ -365,6 +384,14 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
       `[broker-connect] ${unmatchedHoldings.length}/${holdings.length} live holdings for account ${brokerAccountId} had no matching instrument:`,
       unmatchedHoldings
     );
+  }
+  if (ambiguousHoldings.length > 0) {
+    // These specifically collided between 2+ same-exchange candidates —
+    // usually means that stock's trade history is already fragmented across
+    // duplicate Instrument rows (e.g. a truncated-symbol import artifact),
+    // not two genuinely different stocks. Real data problem, not a matcher
+    // bug — surfaced so it can be reconciled deliberately, not auto-merged.
+    console.warn(`[broker-connect] ${ambiguousHoldings.length} holdings collided between multiple candidates:`, ambiguousHoldings);
   }
 
   await prisma.importJob.update({
