@@ -7,6 +7,8 @@ export interface CanonicalHoldingRow {
   quantity: number;
   avgCostPrice: number;
   lastPrice: number | null;
+  /** Prior trading day's close, for a Today's Gain figure. Not every broker's API provides this. */
+  previousClose: number | null;
 }
 
 export interface ExchangedToken {

@@ -11,6 +11,7 @@ model Holding {
   quantity        Decimal  @db.Decimal(18, 4)
   avgCostPrice    Decimal  @db.Decimal(18, 4)
   currentPrice    Decimal? @db.Decimal(18, 4)
+  previousClose   Decimal? @db.Decimal(18, 4) // prior trading day's close, for a Today's Gain figure — only live-synced brokers provide this
   assetClass      String   @default("EQUITY") // EQUITY | ETF | MUTUAL_FUND | BOND | SGB | REIT_INVIT | OTHER
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

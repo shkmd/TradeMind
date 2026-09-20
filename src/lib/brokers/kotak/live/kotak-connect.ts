@@ -212,6 +212,7 @@ export const kotakConnector: BrokerDirectLoginConnector = {
         quantity: h.quantity,
         avgCostPrice: h.averagePrice,
         lastPrice: h.closingPrice ?? null,
+        previousClose: null, // not verified for this connector yet — see Angel One's connector for the pattern once it is
       };
     });
   },

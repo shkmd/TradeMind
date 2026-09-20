@@ -158,6 +158,7 @@ export const upstoxConnector: BrokerApiConnector = {
       quantity: h.quantity,
       avgCostPrice: h.average_price,
       lastPrice: h.last_price ?? null,
+      previousClose: null, // not verified for this connector yet — see Angel One's connector for the pattern once it is
     }));
   },
 };

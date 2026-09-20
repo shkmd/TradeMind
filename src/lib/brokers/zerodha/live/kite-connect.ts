@@ -158,6 +158,7 @@ export const kiteConnectConnector: BrokerApiConnector = {
       quantity: h.quantity,
       avgCostPrice: h.average_price,
       lastPrice: h.last_price ?? null,
+      previousClose: null, // Kite Connect's holdings response doesn't include a previous-close field
     }));
   },
 };

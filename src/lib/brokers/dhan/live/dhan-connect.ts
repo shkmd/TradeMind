@@ -142,6 +142,7 @@ export const dhanConnector: BrokerApiConnector = {
       quantity: h.totalQty,
       avgCostPrice: h.avgCostPrice,
       lastPrice: h.lastTradedPrice ?? null,
+      previousClose: null, // not verified for this connector yet — see Angel One's connector for the pattern once it is
     }));
   },
 };

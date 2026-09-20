@@ -356,7 +356,12 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
     if (existingHolding) {
       await prisma.holding.update({
         where: { id: existingHolding.id },
-        data: { quantity: holding.quantity, avgCostPrice: holding.avgCostPrice, currentPrice: holding.lastPrice },
+        data: {
+          quantity: holding.quantity,
+          avgCostPrice: holding.avgCostPrice,
+          currentPrice: holding.lastPrice,
+          previousClose: holding.previousClose,
+        },
       });
     } else {
       await prisma.holding.create({
@@ -367,6 +372,7 @@ export async function syncLiveAccount(userId: string, brokerAccountId: string): 
           quantity: holding.quantity,
           avgCostPrice: holding.avgCostPrice,
           currentPrice: holding.lastPrice,
+          previousClose: holding.previousClose,
         },
       });
     }

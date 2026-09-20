@@ -81,6 +81,10 @@ interface AngelHoldingRecord {
   quantity: number;
   averageprice: number;
   ltp?: number;
+  // Verified against Angel One's own SmartAPI forum docs (getHolding field
+  // additions announcement) — prior trading day's close, for a Today's Gain
+  // figure matching what Angel One's own app shows.
+  close?: number;
 }
 
 function todayIsoDate(): string {
@@ -184,6 +188,7 @@ export const angelOneConnector: BrokerDirectLoginConnector = {
       quantity: h.quantity,
       avgCostPrice: h.averageprice,
       lastPrice: h.ltp ?? null,
+      previousClose: h.close ?? null,
     }));
   },
 };
