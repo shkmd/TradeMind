@@ -135,13 +135,36 @@ describe("matchEquityInstrumentByName", () => {
     expect(matchEquityInstrumentByName(withLookalike, "MOTHERSON")?.symbol).toBe("SAMVRDHNA MTHRSN INT");
   });
 
-  it("falls back to the naive rule when the reference name matches nothing (a different abbreviation style)", () => {
-    // Real example: the reference table's name "MIRAE ASSET NIFTY METAL
-    // ETF" doesn't textually relate to the CSV's "MIRAEAMC - METAL" at all
-    // (different abbreviation styles on each side) — must still fall back
-    // to the substring rule rather than giving up just because a reference
-    // entry exists.
-    const funds = [{ symbol: "MIRAEAMC - METAL" }];
+  it("falls back to the naive rule when the ticker has no reference entry at all", () => {
+    const funds = [{ symbol: "SOME FUND HOUSE - MADEUPTICKER" }];
+    expect(matchEquityInstrumentByName(funds, "MADEUPTICKER")?.symbol).toBe("SOME FUND HOUSE - MADEUPTICKER");
+  });
+
+  it("uses a verified manual override to disambiguate METAL from the unrelated METALIETF", () => {
+    // Real example: Zerodha's own reference name for METAL ("MIRAE ASSET
+    // NIFTY METAL ETF") doesn't textually relate to Angel One's CSV name
+    // ("MIRAEAMC - METAL") at all, and the naive substring rule alone can't
+    // tell ticker "METAL" apart from the unrelated "ICICIPRAMC - METALIETF"
+    // (a different, separately-held fund whose CSV name also contains
+    // "METAL") — both match, so the naive rule alone reports ambiguous.
+    // The manual override resolves it to the one real match.
+    const funds = [{ symbol: "MIRAEAMC - METAL" }, { symbol: "ICICIPRAMC - METALIETF" }];
     expect(matchEquityInstrumentByName(funds, "METAL")?.symbol).toBe("MIRAEAMC - METAL");
+    expect(matchEquityInstrumentByName(funds, "METALIETF")?.symbol).toBe("ICICIPRAMC - METALIETF");
+  });
+
+  it("resolves the other verified manual overrides (MON100, ITBEES, PSUBNKIETF, SILVERIETF, PHARMABEES)", () => {
+    const funds = [
+      { symbol: "MOTILAL OS NASDAQ100" },
+      { symbol: "NIP IND ETF IT" },
+      { symbol: "ICICIPRAMC - PSUBANK" },
+      { symbol: "ICICIPRAMC - ICICISILVE" },
+      { symbol: "NIPPONAMC - NETFPHARMA" },
+    ];
+    expect(matchEquityInstrumentByName(funds, "MON100")?.symbol).toBe("MOTILAL OS NASDAQ100");
+    expect(matchEquityInstrumentByName(funds, "ITBEES")?.symbol).toBe("NIP IND ETF IT");
+    expect(matchEquityInstrumentByName(funds, "PSUBNKIETF")?.symbol).toBe("ICICIPRAMC - PSUBANK");
+    expect(matchEquityInstrumentByName(funds, "SILVERIETF")?.symbol).toBe("ICICIPRAMC - ICICISILVE");
+    expect(matchEquityInstrumentByName(funds, "PHARMABEES")?.symbol).toBe("NIPPONAMC - NETFPHARMA");
   });
 });

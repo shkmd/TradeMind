@@ -8503,6 +8503,28 @@ export const NSE_TICKER_NAMES: Record<string, string> = {
   ZYDUSWELL: "ZYDUS WELLNESS",
 };
 
+/**
+ * Verified overrides for tickers where Zerodha's own reference name uses a
+ * different abbreviation style than Angel One's CSV export entirely — e.g.
+ * Zerodha names the ticker MON100 "MOTILAL OSWAL NASDAQ 100 ETF" while
+ * Angel One's CSV calls the same fund "MOTILAL OS NASDAQ100" ("OSWAL"
+ * shortened to "OS" on the CSV side); no prefix/suffix rule bridges that.
+ * Each entry here was confirmed by cross-referencing a real account's
+ * actual Angel One holdings dashboard (quantity + avg price) against its
+ * CSV-imported instrument rows — not guessed. METAL specifically also
+ * needed disambiguating from METALIETF (a different, separately-held ETF
+ * from a different fund house whose CSV name also contains "METAL").
+ */
+const TICKER_NAME_OVERRIDES: Record<string, string> = {
+  METAL: "MIRAEAMC - METAL",
+  MON100: "MOTILAL OS NASDAQ100",
+  ITBEES: "NIP IND ETF IT",
+  PSUBNKIETF: "ICICIPRAMC - PSUBANK",
+  SILVERIETF: "ICICIPRAMC - ICICISILVE",
+  PHARMABEES: "NIPPONAMC - NETFPHARMA",
+};
+
 export function getNseTickerName(ticker: string): string | null {
-  return NSE_TICKER_NAMES[ticker.toUpperCase()] ?? null;
+  const upper = ticker.toUpperCase();
+  return TICKER_NAME_OVERRIDES[upper] ?? NSE_TICKER_NAMES[upper] ?? null;
 }
