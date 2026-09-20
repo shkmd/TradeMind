@@ -19,6 +19,11 @@ async function dhanApiRequest<T>(path: string, accessToken: string): Promise<T> 
     headers: { "Content-Type": "application/json", "access-token": accessToken },
   });
   const json = await response.json();
+  // Temporary diagnostic: a real account with confirmed holdings synced as
+  // "0 holdings" with no error at all — need to see exactly what Dhan's API
+  // actually returned (status + raw shape) to tell an empty-but-valid
+  // response apart from a wrong-token-scope or unexpected-shape issue.
+  console.warn(`[dhan-connect] ${path} -> status ${response.status}, ok=${response.ok}`, JSON.stringify(json).slice(0, 1000));
   if (!response.ok) {
     throw new Error(`Dhan API error (${response.status}): ${json.errorMessage ?? json.message ?? response.statusText}`);
   }
