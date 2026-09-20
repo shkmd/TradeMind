@@ -103,4 +103,24 @@ describe("matchEquityInstrumentByName", () => {
     const candidates = [{ symbol: "SOME LONG COMPANY NAME" }];
     expect(matchEquityInstrumentByName(candidates, "ONG")).toBeNull();
   });
+
+  it("bridges an abbreviation ticker with no textual relationship to its name via the NSE reference table", () => {
+    // Real examples: none of these tickers are a prefix/suffix of the
+    // company name at all — only the reference table's real ticker->name
+    // mapping can bridge them.
+    const abbreviated = [
+      { symbol: "CANARA BANK" },
+      { symbol: "POWER FIN CORP LTD." },
+      { symbol: "BANK OF MAHARASHTRA" },
+      { symbol: "INFOSYS LIMITED" },
+    ];
+    expect(matchEquityInstrumentByName(abbreviated, "CANBK")?.symbol).toBe("CANARA BANK");
+    expect(matchEquityInstrumentByName(abbreviated, "PFC")?.symbol).toBe("POWER FIN CORP LTD.");
+    expect(matchEquityInstrumentByName(abbreviated, "MAHABANK")?.symbol).toBe("BANK OF MAHARASHTRA");
+    expect(matchEquityInstrumentByName(abbreviated, "INFY")?.symbol).toBe("INFOSYS LIMITED");
+  });
+
+  it("still returns null for an abbreviation ticker when its real name isn't among the candidates", () => {
+    expect(matchEquityInstrumentByName(csvInstruments, "CANBK")).toBeNull();
+  });
 });

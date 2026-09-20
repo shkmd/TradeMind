@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import type { Exchange, Instrument, InstrumentSegment, OptionType } from "@prisma/client";
 import type { DerivativeContract } from "@/lib/brokers/adapter";
+import { getNseTickerName } from "@/lib/market-data/nse-ticker-names";
 
 /**
  * Reused across a whole import run so the same handful of exchanges and
@@ -161,18 +162,30 @@ function normalizeCompanyName(raw: string): string {
  * `symbol` match fails for every equity holding pulled live after a CSV
  * import — this is the fallback live-sync holdings-matching needs.
  *
+ * Many NSE tickers are abbreviations with no textual relationship to the
+ * company name at all (CANBK/Canara Bank, TCS/Tata Consultancy Services,
+ * INFY/Infosys, M&M/Mahindra & Mahindra, PFC/Power Finance Corp) — no
+ * prefix/suffix rule can bridge those. When the direct ticker-vs-name check
+ * fails, this looks the ticker up in NSE_TICKER_NAMES (a real broker's
+ * published instrument master, see nse-ticker-names.ts) and retries as a
+ * name-to-name comparison instead — "CANARA BANK" (from the table) against
+ * "CANARA BANK" (the CSV's own name) is a far more reliable comparison than
+ * "CANBK" against "CANARA BANK" ever could be.
+ *
  * Deliberately narrow to avoid mismatching two different real stocks: the
  * caller scopes `candidates` to one broker account's own already-imported
  * equity instruments (never the whole DB), and this only returns a match
- * when exactly one candidate's normalized name and the live symbol are a
- * prefix of each other — an ambiguous or zero-candidate result returns null
- * rather than guessing.
+ * when exactly one candidate matches — an ambiguous or zero-candidate result
+ * returns null rather than guessing.
  */
 export function matchEquityInstrumentByName<T extends { symbol: string }>(
   candidates: T[],
   liveSymbol: string
 ): T | null {
   const normalizedLive = liveSymbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const referenceName = getNseTickerName(liveSymbol);
+  const normalizedReferenceName = referenceName ? normalizeCompanyName(referenceName) : null;
+
   const matches = candidates.filter((c) => {
     const normalizedCsv = normalizeCompanyName(c.symbol);
     if (normalizedCsv.length === 0) return false;
@@ -180,7 +193,13 @@ export function matchEquityInstrumentByName<T extends { symbol: string }>(
     // Covers AMC-style fund names like "MIRAEAMC - METAL" or
     // "TATAAML-TATAGOLD", where the live ticker appears as a suffix after
     // the fund house's own prefix rather than at the start of the string.
-    return normalizedLive.length >= 4 && normalizedCsv.includes(normalizedLive);
+    if (normalizedLive.length >= 4 && normalizedCsv.includes(normalizedLive)) return true;
+    // Reference-table bridge for abbreviation-style tickers (see doc comment above).
+    if (normalizedReferenceName && normalizedReferenceName.length >= 4) {
+      if (normalizedCsv === normalizedReferenceName) return true;
+      if (normalizedCsv.startsWith(normalizedReferenceName) || normalizedReferenceName.startsWith(normalizedCsv)) return true;
+    }
+    return false;
   });
   return matches.length === 1 ? matches[0]! : null;
 }
