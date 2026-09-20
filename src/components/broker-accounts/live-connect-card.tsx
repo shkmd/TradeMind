@@ -124,25 +124,44 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
       <div className="flex items-start gap-2 rounded-md bg-warning-muted px-3 py-2 text-xs text-warning-foreground">
         <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <p>
-          {brokerCode === "ANGEL_ONE" ? "Angel One" : "Kotak Neo"} has no broker-hosted login page for its
-          trading API — your {brokerCode === "ANGEL_ONE" ? "password and TOTP" : "TOTP and MPIN"} are sent
-          directly to {brokerCode === "ANGEL_ONE" ? "Angel One's" : "Kotak's"} own servers to create a
-          session, and are never stored here. Used once per connection, then discarded. Your API key is
-          stored, but encrypted — never in plain text.
+          {brokerCode === "DHAN" ? (
+            <>
+              Dhan has no redirect login for this — you generate your own access token directly on Dhan&apos;s
+              site first, so no password ever passes through this app at all. The token itself is stored, but
+              encrypted — never in plain text.
+            </>
+          ) : (
+            <>
+              {brokerCode === "ANGEL_ONE" ? "Angel One" : "Kotak Neo"} has no broker-hosted login page for its
+              trading API — your {brokerCode === "ANGEL_ONE" ? "password and TOTP" : "TOTP and MPIN"} are sent
+              directly to {brokerCode === "ANGEL_ONE" ? "Angel One's" : "Kotak's"} own servers to create a
+              session, and are never stored here. Used once per connection, then discarded. Your API key is
+              stored, but encrypted — never in plain text.
+            </>
+          )}
         </p>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        {brokerCode === "ANGEL_ONE" ? (
+        {brokerCode === "ANGEL_ONE" && (
           <>
             Don&apos;t have an API key yet? Generate one free at{" "}
             <span className="font-medium text-foreground">smartapi.angelone.in</span> — it&apos;s personal to
             your own Angel One account, not shared across users.
           </>
-        ) : (
+        )}
+        {brokerCode === "KOTAK" && (
           <>
             Don&apos;t have an API key yet? Generate one free in the Kotak Neo app — More → Trade API →
             Generate application — it&apos;s personal to your own Kotak account, not shared across users.
+          </>
+        )}
+        {brokerCode === "DHAN" && (
+          <>
+            Don&apos;t have an access token yet? Generate one free at{" "}
+            <span className="font-medium text-foreground">web.dhan.co</span> → Profile → Access DhanHQ APIs —
+            it&apos;s personal to your own Dhan account, valid 24 hours, and you&apos;ll need to regenerate and
+            reconnect here once it expires.
           </>
         )}
       </p>
@@ -166,6 +185,13 @@ function DirectLoginForm({ brokerAccountId, brokerCode }: { brokerAccountId: str
             <Field label="UCC (client code)" name="ucc" />
             <Field label="TOTP (from authenticator app)" name="totp" />
             <Field label="MPIN" name="mpin" type="password" />
+          </>
+        )}
+
+        {brokerCode === "DHAN" && (
+          <>
+            <Field label="Access token" name="accessToken" />
+            <Field label="Dhan Client ID" name="dhanClientId" />
           </>
         )}
 
