@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { PhaseNotice } from "@/components/shared/phase-notice";
 import { EmptyState } from "@/components/shared/empty-state";
 import { KpiCard } from "@/components/dashboard/kpi-card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { HoldingsTable } from "@/components/portfolio/holdings-table";
 import { formatINR, formatPercent } from "@/lib/utils";
 
 interface HoldingRow {
@@ -123,42 +123,25 @@ export default async function HoldingsPage() {
       {holdings.length === 0 ? (
         <EmptyState icon={Wallet} title="No holdings yet" description="Delivery holdings will appear here once imported or entered manually." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-surface-border bg-surface">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Instrument</TableHead>
-                <TableHead>Broker</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Avg cost</TableHead>
-                <TableHead>Current price</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Unrealised P&amp;L</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {holdings.map((h) => {
-                const value = h.currentPrice !== null ? h.currentPrice * h.quantity : null;
-                const unrealised = h.currentPrice !== null ? (h.currentPrice - h.avgCostPrice) * h.quantity : null;
-                const unrealisedPct =
-                  h.currentPrice !== null ? ((h.currentPrice - h.avgCostPrice) / h.avgCostPrice) * 100 : null;
-                return (
-                  <TableRow key={h.id}>
-                    <TableCell className="font-medium">{h.symbol}</TableCell>
-                    <TableCell className="text-muted-foreground">{h.brokerNickname}</TableCell>
-                    <TableCell>{h.quantity}</TableCell>
-                    <TableCell>{formatINR(h.avgCostPrice)}</TableCell>
-                    <TableCell>{h.currentPrice !== null ? formatINR(h.currentPrice) : "—"}</TableCell>
-                    <TableCell>{value !== null ? formatINR(value) : "—"}</TableCell>
-                    <TableCell className={unrealised === null ? "text-muted-foreground" : unrealised >= 0 ? "text-success" : "text-danger"}>
-                      {unrealised !== null ? `${formatINR(unrealised)} (${formatPercent(unrealisedPct)})` : "—"}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+        <HoldingsTable
+          data={holdings.map((h) => {
+            const value = h.currentPrice !== null ? h.currentPrice * h.quantity : null;
+            const unrealised = h.currentPrice !== null ? (h.currentPrice - h.avgCostPrice) * h.quantity : null;
+            const unrealisedPct =
+              h.currentPrice !== null ? ((h.currentPrice - h.avgCostPrice) / h.avgCostPrice) * 100 : null;
+            return {
+              id: h.id,
+              symbol: h.symbol,
+              brokerNickname: h.brokerNickname,
+              quantity: h.quantity,
+              avgCostPrice: h.avgCostPrice,
+              currentPrice: h.currentPrice,
+              value,
+              unrealised,
+              unrealisedPct,
+            };
+          })}
+        />
       )}
     </div>
   );

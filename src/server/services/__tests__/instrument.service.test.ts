@@ -123,4 +123,25 @@ describe("matchEquityInstrumentByName", () => {
   it("still returns null for an abbreviation ticker when its real name isn't among the candidates", () => {
     expect(matchEquityInstrumentByName(csvInstruments, "CANBK")).toBeNull();
   });
+
+  it("prefers a confirmed reference-table match over a false positive from the naive rule", () => {
+    // Real example: ticker "MOTHERSON" (Samvardhana Motherson International,
+    // per the reference table) is also a literal text-prefix of "MOTHERSON
+    // SUMI WRNG" — a different, separately-listed company. Without
+    // preferring the reference match, both would match and this would
+    // wrongly return null (a false ambiguous result) instead of the one
+    // real match.
+    const withLookalike = [{ symbol: "SAMVRDHNA MTHRSN INT" }, { symbol: "MOTHERSON SUMI WRNG" }];
+    expect(matchEquityInstrumentByName(withLookalike, "MOTHERSON")?.symbol).toBe("SAMVRDHNA MTHRSN INT");
+  });
+
+  it("falls back to the naive rule when the reference name matches nothing (a different abbreviation style)", () => {
+    // Real example: the reference table's name "MIRAE ASSET NIFTY METAL
+    // ETF" doesn't textually relate to the CSV's "MIRAEAMC - METAL" at all
+    // (different abbreviation styles on each side) — must still fall back
+    // to the substring rule rather than giving up just because a reference
+    // entry exists.
+    const funds = [{ symbol: "MIRAEAMC - METAL" }];
+    expect(matchEquityInstrumentByName(funds, "METAL")?.symbol).toBe("MIRAEAMC - METAL");
+  });
 });

@@ -177,6 +177,18 @@ function normalizeCompanyName(raw: string): string {
  * equity instruments (never the whole DB), and this only returns a match
  * when exactly one candidate matches — an ambiguous or zero-candidate result
  * returns null rather than guessing.
+ *
+ * When a verified reference name exists for the ticker AND it actually
+ * matches something, that result wins outright rather than being combined
+ * with the naive raw-ticker comparison — a real ticker can be a literal
+ * text-prefix of a completely unrelated company's CSV name (e.g. ticker
+ * "MOTHERSON" — Samvardhana Motherson International, per the reference
+ * table — is also a text-prefix of "MOTHERSON SUMI WRNG", a different,
+ * separately-listed company). Running both checks at once turned that into
+ * a false ambiguous match. But the reference name itself can also use a
+ * different abbreviation style than the CSV (e.g. "MIRAE ASSET NIFTY METAL
+ * ETF" vs the CSV's "MIRAEAMC - METAL") and match nothing at all — in that
+ * case this falls back to the naive rule rather than giving up.
  */
 export function matchEquityInstrumentByName<T extends { symbol: string }>(
   candidates: T[],
@@ -186,20 +198,31 @@ export function matchEquityInstrumentByName<T extends { symbol: string }>(
   const referenceName = getNseTickerName(liveSymbol);
   const normalizedReferenceName = referenceName ? normalizeCompanyName(referenceName) : null;
 
+  if (normalizedReferenceName && normalizedReferenceName.length >= 4) {
+    const referenceMatches = candidates.filter((c) => {
+      const normalizedCsv = normalizeCompanyName(c.symbol);
+      return (
+        normalizedCsv.length > 0 &&
+        (normalizedCsv === normalizedReferenceName ||
+          normalizedCsv.startsWith(normalizedReferenceName) ||
+          normalizedReferenceName.startsWith(normalizedCsv))
+      );
+    });
+    if (referenceMatches.length > 0) {
+      return referenceMatches.length === 1 ? referenceMatches[0]! : null;
+    }
+    // Falls through to the naive rule below when the reference name matches nothing.
+  }
+
   const matches = candidates.filter((c) => {
     const normalizedCsv = normalizeCompanyName(c.symbol);
     if (normalizedCsv.length === 0) return false;
+
     if (normalizedCsv.startsWith(normalizedLive) || normalizedLive.startsWith(normalizedCsv)) return true;
     // Covers AMC-style fund names like "MIRAEAMC - METAL" or
     // "TATAAML-TATAGOLD", where the live ticker appears as a suffix after
     // the fund house's own prefix rather than at the start of the string.
-    if (normalizedLive.length >= 4 && normalizedCsv.includes(normalizedLive)) return true;
-    // Reference-table bridge for abbreviation-style tickers (see doc comment above).
-    if (normalizedReferenceName && normalizedReferenceName.length >= 4) {
-      if (normalizedCsv === normalizedReferenceName) return true;
-      if (normalizedCsv.startsWith(normalizedReferenceName) || normalizedReferenceName.startsWith(normalizedCsv)) return true;
-    }
-    return false;
+    return normalizedLive.length >= 4 && normalizedCsv.includes(normalizedLive);
   });
   return matches.length === 1 ? matches[0]! : null;
 }
